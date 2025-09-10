@@ -433,141 +433,6 @@ def render_chart(chart_config):
         st.error(f"Error rendering chart: {str(e)}")
         st.json(chart_config)  # Show the raw config for debugging
 
-# def execute_sql_on_df(sql: str, df: pd.DataFrame, max_retries: int = 2) -> pd.DataFrame:
-#     """
-#     Execute SQL on the provided DataFrame with robust error handling and type validation.
-
-#     Args:
-#         sql: SQL query string (may contain table names that need to be replaced with 'df')
-#         df: Input DataFrame to query against
-#         max_retries: Maximum number of retry attempts
-
-#     Returns:
-#         DataFrame with query results
-
-#     Raises:
-#         ValueError: If SQL execution fails after retries
-#     """
-#     import duckdb
-#     import re
-
-#     # Clean and prepare the SQL query
-#     sql = clean_sql_query(sql)
-#     sql = sql.strip().rstrip(';')
-
-#     # Clean numeric columns before processing
-#     df = clean_numeric_columns(df)
-
-#     # Convert all column names to lowercase in the DataFrame
-#     df = df.rename(columns=str.lower)
-
-#     # Log the original query for debugging
-#     logger.info(f"Original SQL query: {sql}")
-
-#     # Common SQL injection prevention
-#     if any(keyword in sql.upper() for keyword in ['DROP', 'DELETE', 'UPDATE', 'INSERT', 'ALTER', 'TRUNCATE']):
-#         raise ValueError("Modification queries are not allowed")
-
-#     # Check if the query is a SELECT query
-#     if not sql.strip().upper().startswith('SELECT'):
-#         raise ValueError("Only SELECT queries are allowed")
-
-#     # --- 🔹 Convert column references in SQL to lowercase ---
-#     # Handle SELECT, WHERE, GROUP BY, ORDER BY, HAVING, AND, OR, ,
-#     sql = re.sub(
-#         r'(\b(?:SELECT|WHERE|GROUP BY|ORDER BY|HAVING|AND|OR|,)\s+)([a-zA-Z_][a-zA-Z0-9_]*)',
-#         lambda m: f"{m.group(1)}{m.group(2).lower()}",
-#         sql,
-#         flags=re.IGNORECASE
-#     )
-#     # Handle conditions like "Column =" or "Column ,"
-#     sql = re.sub(
-#         r'(\s+)([a-zA-Z_][a-zA-Z0-9_]*)(\s*[=,])',
-#         lambda m: f"{m.group(1)}{m.group(2).lower()}{m.group(3)}",
-#         sql,
-#         flags=re.IGNORECASE
-#     )
-
-#     # First, find and extract the original table name if it exists
-#     table_match = re.search(r'FROM\s+([^\s;,)()]+)', sql, re.IGNORECASE)
-#     original_table = table_match.group(1).strip('"\'') if table_match else None
-
-#     # Replace any table name with 'df', handling both quoted and unquoted names
-#     if original_table:
-#         escaped_table = re.escape(original_table)
-#         sql = re.sub(
-#             rf'FROM\s+["\']?{escaped_table}["\']?',
-#             'FROM "df"',
-#             sql,
-#             flags=re.IGNORECASE
-#         )
-#         logger.info(f"Converted table name from '{original_table}' to 'df' in SQL query")
-
-#     logger.info(f"Executing SQL after cleanup: {sql}")
-
-#     if not sql.strip():
-#         raise ValueError("Empty SQL query after cleaning")
-
-#     last_error = None
-
-#     for attempt in range(max_retries + 1):
-#         try:
-#             logger.info(f"Attempt {attempt + 1}/{max_retries + 1} - Executing SQL with DuckDB")
-
-#             con = duckdb.connect(database=":memory:")
-#             con.register("df", df)
-
-#             # Some permissive configs
-#             con.execute("PRAGMA enable_verification")
-#             con.execute("PRAGMA enable_progress_bar")
-#             con.execute("PRAGMA threads=4")
-
-#             try:
-#                 result = con.execute(sql).df()
-#                 return result
-#             except Exception as e:
-#                 # Try safe casts
-#                 if 'Conversion Error' in str(e):
-#                     logger.warning(f"Direct CAST failed, trying TRY_CAST: {e}")
-#                     safe_sql = re.sub(
-#                         r'CAST\s*\(([^)]+?)\s+AS\s+([^)]+?)\)',
-#                         r'TRY_CAST(\1 AS \2)',
-#                         sql,
-#                         flags=re.IGNORECASE
-#                     )
-#                     if safe_sql != sql:
-#                         logger.info(f"Modified query to use TRY_CAST: {safe_sql}")
-#                         result = con.execute(safe_sql).df()
-#                         return result
-#                 raise
-#             finally:
-#                 con.close()
-
-#         except Exception as e:
-#             last_error = e
-#             if attempt < max_retries:
-#                 logger.warning(f"Attempt {attempt + 1} failed: {str(e)}")
-#                 # Try cleaning numeric columns more aggressively
-#                 for col in df.select_dtypes(include=['object']).columns:
-#                     try:
-#                         df[col] = pd.to_numeric(df[col], errors='coerce')
-#                     except Exception:
-#                         pass
-#                 continue
-#             else:
-#                 logger.error(f"All {max_retries + 1} attempts failed: {e}")
-#                 raise
-
-#     # Fallback: final attempt
-#     con = duckdb.connect(database=":memory:")
-#     con.register("df", df)
-#     try:
-#         result = con.execute(sql).df()
-#         return result
-#     except Exception as e:
-#         logger.warning(f"DuckDB execution failed with error: {str(e)}")
-#         raise
-
 def execute_sql_on_df(sql: str, df: pd.DataFrame, max_retries: int = 2) -> pd.DataFrame:
     """
     Execute SQL on the provided DataFrame with robust error handling and type validation.
@@ -643,6 +508,140 @@ def execute_sql_on_df(sql: str, df: pd.DataFrame, max_retries: int = 2) -> pd.Da
                 f"Available columns: {sample_columns}\n"
                 f"Sample data (first row): {df_clean.iloc[0].to_dict() if not df_clean.empty else 'No data'}"
             )
+
+
+def get_llm_provider():
+    """Initialize and return the LLM provider (DeepSeek)."""
+    import requests
+    
+    api_key = os.getenv("DEEPSEEK_API_KEY")
+    if not api_key:
+        raise ValueError("DEEPSEEK_API_KEY environment variable not set")
+    
+    def generate(prompt: str) -> str:
+        headers = {
+            "Authorization": f"Bearer {api_key}",
+            "Content-Type": "application/json"
+        }
+        
+        data = {
+            "model": "deepseek-chat",
+            "messages": [
+                {"role": "user", "content": prompt}
+            ],
+            "temperature": 0.7,
+            "max_tokens": 1000
+        }
+        
+        try:
+            response = requests.post(
+                DEEPSEEK_API_URL,
+                headers=headers,
+                json=data
+            )
+            response.raise_for_status()
+            return response.json()["choices"][0]["message"]["content"]
+        except requests.RequestException as e:
+            logger.error(f"Error calling DeepSeek API: {str(e)}")
+            raise RuntimeError(f"Failed to call DeepSeek API: {str(e)}")
+    
+    class LLMProvider:
+        def __init__(self):
+            self.generate = generate
+    
+    return LLMProvider()
+
+
+def generate_charts(prompt_text, sample_data, generated_sql=None):
+    """Generate charts using DeepSeek based on the provided prompt and data."""
+    system_msg = (f'''You are a data visualization expert that creates beautiful, insightful charts using Plotly.
+
+IMPORTANT: Use this compact schema for charts. Example:
+[
+  {{
+    "type": "bar",  // bar, line, pie, scatter, box, etc.
+    "title": "Chart Title",
+    "x": ["A", "B", "C"],  // X values or categories
+    "y": [10, 20, 30],      // Y values
+    "y2": [5, 15, 25],      // Optional: Secondary Y values
+    "color": "#4285F4",     // Optional: Color for main trace
+    "color2": "#EA4335",    // Optional: Color for secondary trace
+    "x_label": "X Axis",    // Optional: X-axis label
+    "y_label": "Y Axis",    // Optional: Y-axis label
+    "orientation": "v"      // Optional: "h" for horizontal bars
+  }}
+]
+
+RULES:
+1. ALWAYS return a valid JSON array of chart objects
+2. For bar/line/scatter: 'x' and 'y' are required
+3. For pie: 'labels' and 'values' are required
+4. Keep it minimal - no unnecessary fields
+5. Use simple color codes (hex or named colors)
+6. Max 2 charts per response
+7. Return ONLY the JSON, no markdown code blocks or additional text
+''')
+
+    user_msg = (
+        f"User query: {prompt_text}\n"
+        f"Available columns: {list(st.session_state.df.columns)}\n"
+        f"Sample data (top rows for charting): {json.dumps(sample_data, default=str)}\n"
+        f"Context: {'MDL-based SQL used' if generated_sql else 'Row-level similarity context used'}\n\n"
+        "Generate at most 2 different visualizations that best represent this data.\n"
+        "Return only valid JSON as described."
+    )
+
+    try:
+        llm = get_llm_provider()
+        prompt = f"{system_msg}\n\n{user_msg}"
+        print("CHART GENERATION 6677: Prompt:", prompt)
+        return llm.generate(prompt).strip()
+    except Exception as e:
+        logger.exception("Error generating visualization with DeepSeek")
+        st.error(f"Failed to generate visualization: {str(e)}")
+        return None
+
+
+def generate_insights(prompt_text, sample_data, generated_sql=None):
+    """Generate concise 2-3 sentence data insights based on the SQL output."""
+    
+    system_msg = """You are a data analyst that provides clear, concise insights from data.
+
+RULES:
+1. Write ONLY 2-3 sentences maximum
+2. Focus on the most important finding
+3. Include specific numbers and percentages
+4. Use plain, non-technical language
+5. Structure as a single paragraph, no bullet points
+6. Example format: "[Key finding] increased/decreased by X% to [value], driven by [main factor]. [Additional context if needed]."
+
+Return ONLY the insight text, no markdown or formatting."""
+
+    user_msg = (
+        f"User query: {prompt_text}\n"
+        f"Data columns: {list(sample_data[0].keys()) if sample_data else 'No data'}\n"
+        f"Sample data: {json.dumps(sample_data[:3], default=str) if sample_data else 'No data'}\n"
+        f"SQL context: {generated_sql if generated_sql else 'No SQL'}\n\n"
+        "Provide a 2-3 sentence insight about the most important trend or finding in this data."
+    )
+
+    try:
+        llm = get_llm_provider()
+        prompt = f"{system_msg}\n\n{user_msg}"
+        logger.info("Generating concise insights...")
+        insight = llm.generate(prompt).strip()
+        
+        # Clean up the response
+        insight = insight.strip('"\'')  # Remove any surrounding quotes
+        if insight.startswith('Insight: '):
+            insight = insight[9:]  # Remove 'Insight: ' prefix if present
+            
+        return insight
+        
+    except Exception as e:
+        logger.exception("Error generating insights")
+        return None
+
 
 if st.button("Generate Charts") and user_prompt:
     with st.spinner("Analyzing your data…"):
@@ -728,101 +727,8 @@ if st.button("Generate Charts") and user_prompt:
                 else:
                     query_result_df = st.session_state.df.head(100)
 
-            def get_llm_provider():
-                """Initialize and return the LLM provider (DeepSeek)."""
-                import requests
-                
-                api_key = os.getenv("DEEPSEEK_API_KEY")
-                if not api_key:
-                    raise ValueError("DEEPSEEK_API_KEY environment variable not set")
-                
-                def generate(prompt: str) -> str:
-                    headers = {
-                        "Authorization": f"Bearer {api_key}",
-                        "Content-Type": "application/json"
-                    }
-                    
-                    data = {
-                        "model": "deepseek-chat",
-                        "messages": [
-                            {"role": "user", "content": prompt}
-                        ],
-                        "temperature": 0.7,
-                        "max_tokens": 1000
-                    }
-                    
-                    try:
-                        response = requests.post(
-                            DEEPSEEK_API_URL,
-                            headers=headers,
-                            json=data
-                        )
-                        response.raise_for_status()
-                        return response.json()["choices"][0]["message"]["content"]
-                    except requests.RequestException as e:
-                        logger.error(f"Error calling DeepSeek API: {str(e)}")
-                        raise RuntimeError(f"Failed to call DeepSeek API: {str(e)}")
-                
-                class LLMProvider:
-                    def __init__(self):
-                        self.generate = generate
-                
-                return LLMProvider()
-
-            def generate_charts(prompt_text, sample_data, generated_sql=None):
-                """Generate charts using DeepSeek based on the provided prompt and data."""
-                system_msg = (f'''You are a data visualization expert that creates beautiful, insightful charts using Plotly.
-
-IMPORTANT: Use this compact schema for charts. Example:
-[
-  {{
-    "type": "bar",  // bar, line, pie, scatter, box, etc.
-    "title": "Chart Title",
-    "x": ["A", "B", "C"],  // X values or categories
-    "y": [10, 20, 30],      // Y values
-    "y2": [5, 15, 25],      // Optional: Secondary Y values
-    "color": "#4285F4",     // Optional: Color for main trace
-    "color2": "#EA4335",    // Optional: Color for secondary trace
-    "x_label": "X Axis",    // Optional: X-axis label
-    "y_label": "Y Axis",    // Optional: Y-axis label
-    "orientation": "v"      // Optional: "h" for horizontal bars
-  }}
-]
-
-RULES:
-1. ALWAYS return a valid JSON array of chart objects
-2. For bar/line/scatter: 'x' and 'y' are required
-3. For pie: 'labels' and 'values' are required
-4. Keep it minimal - no unnecessary fields
-5. Use simple color codes (hex or named colors)
-6. Max 2 charts per response
-7. Return ONLY the JSON, no markdown code blocks or additional text
-''')
-
-
-                user_msg = (
-                    f"User query: {prompt_text}\n"
-                    f"Available columns: {list(st.session_state.df.columns)}\n"
-                    f"Sample data (top rows for charting): {json.dumps(sample_data, default=str)}\n"
-                    f"Context: {'MDL-based SQL used' if generated_sql else 'Row-level similarity context used'}\n\n"
-                    "Generate at most 2 different visualizations that best represent this data.\n"
-                    "Return only valid JSON as described."
-                )
-
-
-                try:
-                    llm = get_llm_provider()
-                    prompt = f"{system_msg}\n\n{user_msg}"
-                    print("CHART GENERATION 6677: Prompt:", prompt)
-                    return llm.generate(prompt).strip()
-                except Exception as e:
-                    logger.exception("Error generating visualization with DeepSeek")
-                    st.error(f"Failed to generate visualization: {str(e)}")
-                    return None
-
             # Generate charts with compact schema
             sample_data = query_result_df.head(25).to_dict(orient='records')
-            # sample_data = query_result_df.to_dict(orient='records')
             chart_json = generate_charts(user_prompt, sample_data, generated_sql)
             
             if not chart_json:
@@ -926,6 +832,22 @@ RULES:
                 st.error(f"Failed to parse chart configuration: {str(e)}")
             except Exception as e:
                 st.error(f"Error generating chart: {str(e)}")
+
+            # Generate insights after charts
+            st.subheader("📊 Data Insights")
+            with st.spinner("Generating insights..."):
+                insights = generate_insights(user_prompt, sample_data, generated_sql)
+                
+                if insights:
+                    # Display insights as a clean paragraph
+                    st.markdown("### Key Findings:")
+                    st.markdown(insights)
+                    
+                    # Add insights to expandable section for debugging
+                    with st.expander("Debug: Raw Insights Response"):
+                        st.text(insights)
+                else:
+                    st.warning("Could not generate insights. Please try again.")
 
         except RuntimeError as e:
             st.error(str(e))
