@@ -736,11 +736,6 @@ if st.button("Generate Charts") and user_prompt:
                 st.stop()
 
             st.subheader("Visualized Charts")
-            with st.expander("Debug: Raw LLM Response"):
-                st.code(chart_json, language="json")
-                if generated_sql:
-                    st.write("### SQL used")
-                    st.code(generated_sql, language="sql")
             
             # Clean the JSON response
             clean_json = chart_json.strip()
@@ -844,8 +839,8 @@ if st.button("Generate Charts") and user_prompt:
                     st.markdown(insights)
                     
                     # Add insights to expandable section for debugging
-                    with st.expander("Debug: Raw Insights Response"):
-                        st.text(insights)
+                    # with st.expander("Debug: Raw Insights Response"):
+                    #     st.text(insights)
                 else:
                     st.warning("Could not generate insights. Please try again.")
 
