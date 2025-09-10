@@ -433,85 +433,156 @@ def render_chart(chart_config):
         st.error(f"Error rendering chart: {str(e)}")
         st.json(chart_config)  # Show the raw config for debugging
 
-# def generate_sql_from_prompt(prompt: str, df: pd.DataFrame) -> str:
+# def execute_sql_on_df(sql: str, df: pd.DataFrame, max_retries: int = 2) -> pd.DataFrame:
 #     """
-#     Generate an appropriate SQL query based on the user's natural language prompt.
-    
+#     Execute SQL on the provided DataFrame with robust error handling and type validation.
+
 #     Args:
-#         prompt: User's natural language query
-#         df: DataFrame to analyze for column names and data types
-        
+#         sql: SQL query string (may contain table names that need to be replaced with 'df')
+#         df: Input DataFrame to query against
+#         max_retries: Maximum number of retry attempts
+
 #     Returns:
-#         str: Generated SQL query
+#         DataFrame with query results
+
+#     Raises:
+#         ValueError: If SQL execution fails after retries
 #     """
-#     # This is a simplified version - you might want to use an LLM in production
-#     try:
-#         # Simple keyword-based SQL generation
-#         columns = ", ".join([f'"{col}"' for col in df.columns])
-#         print("INSIDE generate_sql_from_prompt")
-#         # Default to selecting all columns
-#         sql = f"SELECT {columns} FROM df"
-        
-#         # Add WHERE clause if specific filters are mentioned
-#         if 'where' in prompt.lower() or 'filter' in prompt.lower():
-#             # This is a simplified version - in practice, you'd want to parse the prompt better
-#             sql += " WHERE 1=1"  # Placeholder for actual conditions
-            
-#         # Add GROUP BY if aggregation is mentioned
-#         if any(word in prompt.lower() for word in ['average', 'sum', 'count', 'min', 'max', 'group by']):
-#             # Try to identify the grouping column
-#             for col in df.columns:
-#                 if col.lower() in prompt.lower():
-#                     sql += f" GROUP BY \"{col}\""
-#                     break
-                    
-#         # Add ORDER BY if sorting is mentioned
-#         if any(word in prompt.lower() for word in ['sort', 'order by', 'highest', 'lowest']):
-#             if 'desc' in prompt.lower() or 'highest' in prompt.lower():
-#                 sql += " ORDER BY 1 DESC"
+#     import duckdb
+#     import re
+
+#     # Clean and prepare the SQL query
+#     sql = clean_sql_query(sql)
+#     sql = sql.strip().rstrip(';')
+
+#     # Clean numeric columns before processing
+#     df = clean_numeric_columns(df)
+
+#     # Convert all column names to lowercase in the DataFrame
+#     df = df.rename(columns=str.lower)
+
+#     # Log the original query for debugging
+#     logger.info(f"Original SQL query: {sql}")
+
+#     # Common SQL injection prevention
+#     if any(keyword in sql.upper() for keyword in ['DROP', 'DELETE', 'UPDATE', 'INSERT', 'ALTER', 'TRUNCATE']):
+#         raise ValueError("Modification queries are not allowed")
+
+#     # Check if the query is a SELECT query
+#     if not sql.strip().upper().startswith('SELECT'):
+#         raise ValueError("Only SELECT queries are allowed")
+
+#     # --- 🔹 Convert column references in SQL to lowercase ---
+#     # Handle SELECT, WHERE, GROUP BY, ORDER BY, HAVING, AND, OR, ,
+#     sql = re.sub(
+#         r'(\b(?:SELECT|WHERE|GROUP BY|ORDER BY|HAVING|AND|OR|,)\s+)([a-zA-Z_][a-zA-Z0-9_]*)',
+#         lambda m: f"{m.group(1)}{m.group(2).lower()}",
+#         sql,
+#         flags=re.IGNORECASE
+#     )
+#     # Handle conditions like "Column =" or "Column ,"
+#     sql = re.sub(
+#         r'(\s+)([a-zA-Z_][a-zA-Z0-9_]*)(\s*[=,])',
+#         lambda m: f"{m.group(1)}{m.group(2).lower()}{m.group(3)}",
+#         sql,
+#         flags=re.IGNORECASE
+#     )
+
+#     # First, find and extract the original table name if it exists
+#     table_match = re.search(r'FROM\s+([^\s;,)()]+)', sql, re.IGNORECASE)
+#     original_table = table_match.group(1).strip('"\'') if table_match else None
+
+#     # Replace any table name with 'df', handling both quoted and unquoted names
+#     if original_table:
+#         escaped_table = re.escape(original_table)
+#         sql = re.sub(
+#             rf'FROM\s+["\']?{escaped_table}["\']?',
+#             'FROM "df"',
+#             sql,
+#             flags=re.IGNORECASE
+#         )
+#         logger.info(f"Converted table name from '{original_table}' to 'df' in SQL query")
+
+#     logger.info(f"Executing SQL after cleanup: {sql}")
+
+#     if not sql.strip():
+#         raise ValueError("Empty SQL query after cleaning")
+
+#     last_error = None
+
+#     for attempt in range(max_retries + 1):
+#         try:
+#             logger.info(f"Attempt {attempt + 1}/{max_retries + 1} - Executing SQL with DuckDB")
+
+#             con = duckdb.connect(database=":memory:")
+#             con.register("df", df)
+
+#             # Some permissive configs
+#             con.execute("PRAGMA enable_verification")
+#             con.execute("PRAGMA enable_progress_bar")
+#             con.execute("PRAGMA threads=4")
+
+#             try:
+#                 result = con.execute(sql).df()
+#                 return result
+#             except Exception as e:
+#                 # Try safe casts
+#                 if 'Conversion Error' in str(e):
+#                     logger.warning(f"Direct CAST failed, trying TRY_CAST: {e}")
+#                     safe_sql = re.sub(
+#                         r'CAST\s*\(([^)]+?)\s+AS\s+([^)]+?)\)',
+#                         r'TRY_CAST(\1 AS \2)',
+#                         sql,
+#                         flags=re.IGNORECASE
+#                     )
+#                     if safe_sql != sql:
+#                         logger.info(f"Modified query to use TRY_CAST: {safe_sql}")
+#                         result = con.execute(safe_sql).df()
+#                         return result
+#                 raise
+#             finally:
+#                 con.close()
+
+#         except Exception as e:
+#             last_error = e
+#             if attempt < max_retries:
+#                 logger.warning(f"Attempt {attempt + 1} failed: {str(e)}")
+#                 # Try cleaning numeric columns more aggressively
+#                 for col in df.select_dtypes(include=['object']).columns:
+#                     try:
+#                         df[col] = pd.to_numeric(df[col], errors='coerce')
+#                     except Exception:
+#                         pass
+#                 continue
 #             else:
-#                 sql += " ORDER BY 1"
-                
-#         # Add LIMIT if a specific number is mentioned
-#         import re
-#         limit_match = re.search(r'(?:show|display|limit|top)\s+(\d+)', prompt.lower())
-#         if limit_match:
-#             sql += f" LIMIT {limit_match.group(1)}"
-            
-#         return sql
-        
+#                 logger.error(f"All {max_retries + 1} attempts failed: {e}")
+#                 raise
+
+#     # Fallback: final attempt
+#     con = duckdb.connect(database=":memory:")
+#     con.register("df", df)
+#     try:
+#         result = con.execute(sql).df()
+#         return result
 #     except Exception as e:
-#         logger.error(f"Error generating SQL: {str(e)}")
-#         return ""
+#         logger.warning(f"DuckDB execution failed with error: {str(e)}")
+#         raise
 
 def execute_sql_on_df(sql: str, df: pd.DataFrame, max_retries: int = 2) -> pd.DataFrame:
     """
     Execute SQL on the provided DataFrame with robust error handling and type validation.
-    
-    Args:
-        sql: SQL query string (may contain table names that need to be replaced with 'df')
-        df: Input DataFrame to query against
-        max_retries: Maximum number of retry attempts
-        
-    Returns:
-        DataFrame with query results
-        
-    Raises:
-        ValueError: If SQL execution fails after retries
+    Uses pandasql for better SQL compatibility.
     """
-    import duckdb
     import re
+    from pandasql import sqldf
     
     # Clean and prepare the SQL query
     sql = clean_sql_query(sql)
     sql = sql.strip().rstrip(';')
     
-    # Clean numeric columns before processing
-    df = clean_numeric_columns(df)
-    
     # Log the original query for debugging
     logger.info(f"Original SQL query: {sql}")
-    
+
     # Common SQL injection prevention
     if any(keyword in sql.upper() for keyword in ['DROP', 'DELETE', 'UPDATE', 'INSERT', 'ALTER', 'TRUNCATE']):
         raise ValueError("Modification queries are not allowed")
@@ -520,128 +591,59 @@ def execute_sql_on_df(sql: str, df: pd.DataFrame, max_retries: int = 2) -> pd.Da
     if not sql.strip().upper().startswith('SELECT'):
         raise ValueError("Only SELECT queries are allowed")
     
-    # First, find and extract the original table name if it exists
-    table_match = re.search(r'FROM\s+([^\s;,)()]+)', sql, re.IGNORECASE)
-    original_table = table_match.group(1).strip('"\'') if table_match else None
+    # Create a clean copy of the dataframe with lowercase column names
+    df_clean = df.copy()
+    df_clean.columns = [str(col).lower() for col in df_clean.columns]
     
-    # Replace any table name with 'df', handling both quoted and unquoted names
-    if original_table:
-        # Escape special regex characters in the original table name
-        escaped_table = re.escape(original_table)
-        # Replace the table name with 'df', preserving any quotes if present
-        sql = re.sub(
-            rf'FROM\s+["\']?{escaped_table}["\']?',
-            'FROM "df"',
-            sql,
-            flags=re.IGNORECASE
-        )
+    # Replace the table name with 'df_clean' (case insensitive)
+    sql = re.sub(r'(?i)from\s+[^\s;,)()]+', 'FROM df_clean', sql, flags=re.IGNORECASE)
+    
+    # Convert all column references to lowercase
+    for col in df.columns:
+        col_lower = str(col).lower()
+        if col != col_lower:
+            # Replace column names in SELECT, WHERE, GROUP BY, ORDER BY, HAVING
+            sql = re.sub(
+                rf'(?<![a-zA-Z0-9_`".]){re.escape(col)}(?![a-zA-Z0-9_`"])', 
+                f'"{col_lower}"', 
+                sql, 
+                flags=re.IGNORECASE
+            )
+    
+    # Handle backtick-quoted column names
+    sql = re.sub(r'`([^`]+)`', r'"\1"', sql)
+    
+    logger.info(f"Modified SQL: {sql}")
+    
+    try:
+        # Execute the query using pandasql with a dictionary of available dataframes
+        result = sqldf(sql, {'df_clean': df_clean})
+        
+        # If the result is empty but the query should return something,
+        # try to provide more helpful error information
+        if result.empty and ('count(' in sql.lower() or 'sum(' in sql.lower()):
+            logger.warning("Empty result for aggregation query")
+            # Show sample data for debugging
+            sample = df_clean.head(5)
+            logger.info(f"Sample data (first 5 rows):\n{sample}")
+            
+        return result
+        
+    except Exception as e:
+        # Try one more time with the original column names if we were using lowercase
+        try:
+            logger.warning("Retrying with original column names...")
+            return sqldf(sql, {'df_clean': df})
+        except Exception as e2:
+            logger.error(f"SQL execution failed: {str(e2)}")
+            # Provide more detailed error information
+            sample_columns = ", ".join([f'"{col}"' for col in df_clean.columns])
+            raise ValueError(
+                f"Failed to execute SQL: {str(e2)}\n\n"
+                f"Available columns: {sample_columns}\n"
+                f"Sample data (first row): {df_clean.iloc[0].to_dict() if not df_clean.empty else 'No data'}"
+            )
 
-    # Log the transformation
-    if original_table:
-        logger.info(f"Converted table name from '{original_table}' to 'df' in SQL query")
-    
-    logger.info(f"Executing SQL: {sql}")
-    
-    # Try DuckDB first (faster for larger datasets)
-    if not sql.strip():
-        raise ValueError("Empty SQL query after cleaning")
-        
-    last_error = None
-    
-    for attempt in range(max_retries + 1):
-        try:
-            import duckdb
-            logger.info(f"Attempt {attempt + 1}/{max_retries + 1} - Executing SQL with DuckDB")
-            
-            # Create a clean connection for each attempt
-            con = duckdb.connect(database=":memory:")
-            con.register("df", df)
-            
-            # Set a more permissive configuration for type casting
-            con.execute("PRAGMA enable_verification")
-            con.execute("PRAGMA enable_progress_bar")
-            con.execute("PRAGMA threads=4")
-            
-            # Execute the query with a more specific error context
-            try:
-                # First try the query as-is
-                try:
-                    result = con.execute(sql).df()
-                    return result
-                except Exception as e:
-                    # If that fails, try wrapping numeric columns in TRY_CAST
-                    if 'Conversion Error' in str(e):
-                        logger.warning(f"Direct CAST failed, trying TRY_CAST: {e}")
-                        safe_sql = sql
-                        # Find all CAST(column AS type) patterns and wrap them in TRY_CAST
-                        import re
-                        safe_sql = re.sub(r'CAST\s*\(([^)]+?)\s+AS\s+([^)]+?)\)', 
-                                        r'TRY_CAST(\1 AS \2)', 
-                                        sql, 
-                                        flags=re.IGNORECASE)
-                        if safe_sql != sql:
-                            logger.info(f"Modified query to use TRY_CAST: {safe_sql}")
-                            result = con.execute(safe_sql).df()
-                            return result
-            except Exception as e:
-                # If it's a type conversion error, try to clean the data and retry
-                if 'Conversion Error' in str(e) and attempt < max_retries:
-                    logger.warning(f"Type conversion error, attempting to clean data and retry: {str(e)}")
-                    
-                    # Create a new clean connection
-                    con.close()
-                    con = duckdb.connect(database=":memory:")
-                    
-                    # Clean numeric columns more aggressively
-                    for col in df.select_dtypes(include=['object']).columns:
-                        try:
-                            # Try to convert to numeric, non-convertible become NaN
-                            df[col] = pd.to_numeric(df[col], errors='coerce')
-                        except Exception:
-                            # If conversion fails, leave as is
-                            pass
-                    
-                    # Register the cleaned dataframe
-                    con.register("df", df)
-                    
-                    # Update DuckDB configuration
-                    con.execute("PRAGMA enable_verification")
-                    con.execute("PRAGMA enable_progress_bar")
-                    con.execute("PRAGMA threads=4")
-                    
-                    # Modify the query to handle potential NULLs from cleaning
-                    safe_sql = sql.replace("AVG(", "AVG(NULLIF(")
-                    safe_sql = safe_sql.replace(" AS FLOAT)", ", 0) AS FLOAT)")
-                    
-                    logger.info(f"Retrying with cleaned data and modified query: {safe_sql}")
-                    try:
-                        result = con.execute(safe_sql).df()
-                        return result
-                    except Exception as retry_error:
-                        logger.warning(f"Retry {attempt + 1} failed: {retry_error}")
-                        continue
-                raise
-            finally:
-                con.close()
-                
-        except Exception as e:
-            last_error = e
-            if attempt == max_retries:
-                logger.error(f"All {max_retries + 1} attempts failed")
-                break
-            logger.warning(f"Attempt {attempt + 1} failed: {str(e)}")
-            
-    # If we get here, all attempts failed
-        
-        con = duckdb.connect(database=":memory:")
-        con.register("df", df)
-        
-        try:
-            result = con.execute(sql).df()
-            return result
-        except Exception as e:
-            logger.warning(f"DuckDB execution failed with error: {str(e)}")
-            raise
 if st.button("Generate Charts") and user_prompt:
     with st.spinner("Analyzing your data…"):
         try:
@@ -769,14 +771,6 @@ if st.button("Generate Charts") and user_prompt:
 
             def generate_charts(prompt_text, sample_data, generated_sql=None):
                 """Generate charts using DeepSeek based on the provided prompt and data."""
-                generation_config = {
-                    "temperature": 0.7,
-                    "max_tokens": 1500,
-                    "top_p": 1.0,
-                    "model": "deepseek-chat"
-                }
-
-
                 system_msg = (f'''You are a data visualization expert that creates beautiful, insightful charts using Plotly.
 
 IMPORTANT: Use this compact schema for charts. Example:
@@ -827,8 +821,8 @@ RULES:
                     return None
 
             # Generate charts with compact schema
-            # sample_data = query_result_df.head(5).to_dict(orient='records')
-            sample_data = query_result_df.to_dict(orient='records')
+            sample_data = query_result_df.head(25).to_dict(orient='records')
+            # sample_data = query_result_df.to_dict(orient='records')
             chart_json = generate_charts(user_prompt, sample_data, generated_sql)
             
             if not chart_json:
