@@ -12,4 +12,6 @@ psycopg2-binary>=2.9.9
 faiss-cpu>=1.7.0  # Use faiss-gpu if you have CUDA
 sqlalchemy>=2.0.0
 tqdm>=4.65.0  # For progress bars
+plotly==6.3.0  # For interactive charts
+pandasql>=0.7.3  # For SQL queries on DataFrames
 --find-links https://download.pytorch.org/whl/torch_stable.html
