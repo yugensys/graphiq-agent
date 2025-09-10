@@ -1,7 +1,7 @@
 # Virtual Environment
 venv/
 ENV/
-faiss_index/
+./faiss_index
 backup_main.py
 
 # Python cache
