@@ -369,6 +369,49 @@ def clean_numeric_columns(df: pd.DataFrame) -> pd.DataFrame:
             df[col] = coerce_numeric_safe(df[col])
     return df
 
+def normalize_chart_config(chart_config):
+    """Normalize LLM chart config to expected format."""
+    # Handle the case where chart_config is a list of charts
+    if isinstance(chart_config, list):
+        return [normalize_chart_config(config) for config in chart_config]
+        
+    # Handle the new LLM response format (with x, y, labels, values)
+    if 'x' in chart_config and 'y' in chart_config:
+        # This is a bar/line chart with x and y values
+        return {
+            "data": {
+                "labels": chart_config['x'],
+                "datasets": [{
+                    "data": chart_config['y'],
+                    "backgroundColor": chart_config.get('color', None)
+                }]
+            },
+            "options": {
+                "title": {"text": chart_config.get("title", "")},
+                "scales": {
+                    "x": {"title": {"text": chart_config.get("x_label", "")}},
+                    "y": {"title": {"text": chart_config.get("y_label", "")}}
+                }
+            },
+            "type": chart_config.get("type", "bar"),
+            "orientation": chart_config.get("orientation", "v")
+        }
+    elif 'values' in chart_config and 'labels' in chart_config:
+        # This is a pie/donut chart with values and labels
+        return {
+            "data": {
+                "labels": chart_config['labels'],
+                "datasets": [{
+                    "data": chart_config['values'],
+                    "backgroundColor": chart_config.get('color', None)
+                }]
+            },
+            "options": {
+                "title": {"text": chart_config.get("title", "")}
+            },
+            "type": chart_config.get("type", "pie")
+        }
+    return chart_config
 
 def render_chart(chart_config):
     """Render a chart based on the provided configuration."""
@@ -376,61 +419,102 @@ def render_chart(chart_config):
     import json
     import plotly.express as px
     import pandas as pd
+    import numpy as np
     
     try:
+        # If we have a list of charts, render each one
+        if isinstance(chart_config, list):
+            for chart in chart_config:
+                render_chart(chart)
+            return
+            
+        # Normalize the chart config
+        chart_config = normalize_chart_config(chart_config)
+        
         chart_type = chart_config.get('type', 'bar')
         data = chart_config.get('data', {})
         options = chart_config.get('options', {})
         
-        # Create a dataframe from the chart data
-        df = pd.DataFrame({
-            'labels': data.get('labels', []),
-            'values': data['datasets'][0]['data'] if data.get('datasets') else []
-        })
+        # Get the first dataset (supporting multiple datasets in the future)
+        dataset = data.get('datasets', [{}])[0] if data.get('datasets') else {}
         
-        if chart_type == 'pie':
-            fig = px.pie(
-                df, 
-                values='values', 
-                names='labels',
-                title=options.get('title', {}).get('text', ''),
-                color_discrete_sequence=px.colors.qualitative.Plotly
-            )
-        elif chart_type == 'doughnut':
-            fig = px.pie(
-                df, 
-                values='values', 
-                names='labels',
-                title=options.get('title', {}).get('text', ''),
-                hole=0.4,
-                color_discrete_sequence=px.colors.qualitative.Plotly
-            )
+        # Create a dataframe from the chart data
+        if 'labels' in data and 'data' in dataset:
+            df = pd.DataFrame({
+                'labels': data['labels'],
+                'values': dataset['data']
+            })
+        else:
+            df = pd.DataFrame()
+        
+        # Get color sequence and ensure it's a list with valid colors
+        color_sequence = None
+        if 'backgroundColor' in dataset:
+            color_sequence = dataset['backgroundColor']
+            if not isinstance(color_sequence, (list, tuple)):
+                color_sequence = [color_sequence] if color_sequence else None
+        
+        # Get the title from options or root level
+        title = options.get('title', {}).get('text', '') if isinstance(options, dict) else ''
+        if not title and 'title' in chart_config:
+            title = chart_config['title']
+        
+        # Handle different chart types
+        if chart_type in ['pie', 'doughnut']:
+            if not df.empty:
+                fig = px.pie(
+                    df, 
+                    values='values', 
+                    names='labels',
+                    title=title,
+                    hole=0.4 if chart_type == 'doughnut' else 0,
+                    color_discrete_sequence=color_sequence or px.colors.qualitative.Plotly
+                )
+            
         elif chart_type in ['bar', 'horizontalBar']:
             orientation = 'h' if chart_type == 'horizontalBar' else 'v'
-            fig = px.bar(
-                df,
-                x='values' if orientation == 'h' else 'labels',
-                y='labels' if orientation == 'h' else 'values',
-                title=options.get('title', {}).get('text', ''),
-                orientation=orientation,
-                labels={'values': 'Average Page Views', 'labels': 'Source'}
-            )
+            if not df.empty:
+                fig = px.bar(
+                    df,
+                    x='values' if orientation == 'h' else 'labels',
+                    y='labels' if orientation == 'h' else 'values',
+                    title=title,
+                    orientation=orientation,
+                    color_discrete_sequence=color_sequence or [chart_config.get('color')] if 'color' in chart_config else None
+                )
+                
+                # Update axis labels if provided
+                if 'scales' in options:
+                    if 'x' in options['scales'] and 'title' in options['scales']['x']:
+                        fig.update_xaxes(title_text=options['scales']['x']['title'].get('text', ''))
+                    if 'y' in options['scales'] and 'title' in options['scales']['y']:
+                        fig.update_yaxes(title_text=options['scales']['y']['title'].get('text', ''))
         else:
             st.warning(f"Unsupported chart type: {chart_type}")
             return
-            
-        # Update layout
-        fig.update_layout(
-            showlegend=True,
-            legend=dict(orientation='h', yanchor='bottom', y=1.02, xanchor='right', x=1),
-            margin=dict(l=20, r=20, t=40, b=20),
-            height=400
-        )
         
-        st.plotly_chart(fig, use_container_width=True)
+        # Update layout
+        if 'fig' in locals():
+            fig.update_layout(
+                showlegend=chart_type in ['pie', 'doughnut'],
+                legend=dict(
+                    orientation='h',
+                    yanchor='bottom',
+                    y=1.02,
+                    xanchor='right',
+                    x=1
+                ),
+                margin=dict(l=20, r=20, t=40, b=20),
+                height=400,
+                title_x=0.5,
+                title_y=0.95
+            )
+            
+            st.plotly_chart(fig, use_container_width=True)
         
     except Exception as e:
         st.error(f"Error rendering chart: {str(e)}")
+        st.json(chart_config)  # For debugging
         st.json(chart_config)  # Show the raw config for debugging
 
 def execute_sql_on_df(sql: str, df: pd.DataFrame, max_retries: int = 2) -> pd.DataFrame:
@@ -445,7 +529,10 @@ def execute_sql_on_df(sql: str, df: pd.DataFrame, max_retries: int = 2) -> pd.Da
     sql = clean_sql_query(sql)
     sql = sql.strip().rstrip(';')
     
-    # Log the original query for debugging
+    # Log the original query for debugging with more visibility
+    print("\n" + "="*80)
+    print(f"[DEBUG] Original SQL query:\n{sql}")
+    print("="*80 + "\n")
     logger.info(f"Original SQL query: {sql}")
 
     # Common SQL injection prevention
@@ -460,24 +547,59 @@ def execute_sql_on_df(sql: str, df: pd.DataFrame, max_retries: int = 2) -> pd.Da
     df_clean = df.copy()
     df_clean.columns = [str(col).lower() for col in df_clean.columns]
     
-    # Replace the table name with 'df_clean' (case insensitive)
-    sql = re.sub(r'(?i)from\s+[^\s;,)()]+', 'FROM df_clean', sql, flags=re.IGNORECASE)
+    # Extract the table name if it exists - handle various quoting styles and special characters
+    table_match = re.search(r'(?i)from\s+([`"\[\]]?[^\s`"\[\];]+(?:\s+[^\s`"\[\];]+)*[`"\[\]]?)(?:\s|;|$)', sql)
+    if table_match:
+        original_table = table_match.group(1).strip('`"[]')
+        print(f"[DEBUG] Found table reference: '{original_table}'")
+        logger.info(f"Found table reference: '{original_table}'")
+        
+        # Replace the entire matched table reference with 'df_clean'
+        sql = sql.replace(table_match.group(1), 'df_clean', 1)
+        print(f"[DEBUG] Replaced table name. New query:\n{sql}")
+    else:
+        print("[DEBUG] No table reference found in SQL query")
+        # If no FROM clause found, try to add one
+        if "FROM" not in sql.upper() and "WHERE" in sql.upper():
+            where_pos = sql.upper().find("WHERE")
+            sql = sql[:where_pos] + "FROM df_clean " + sql[where_pos:]
+            print(f"[DEBUG] Added missing FROM clause. New query:\n{sql}")
+        elif "FROM" not in sql.upper():
+            sql = sql + " FROM df_clean"
+            print(f"[DEBUG] Added missing FROM clause at the end. New query:\n{sql}")
     
     # Convert all column references to lowercase
+    print("[DEBUG] Available columns in DataFrame:")
+    for i, col in enumerate(df.columns, 1):
+        print(f"  {i}. {col} (type: {type(col)})")
+    
     for col in df.columns:
         col_lower = str(col).lower()
         if col != col_lower:
+            print(f"[DEBUG] Converting column name to lowercase: '{col}' -> '{col_lower}'")
             # Replace column names in SELECT, WHERE, GROUP BY, ORDER BY, HAVING
+            sql_before = sql
             sql = re.sub(
                 rf'(?<![a-zA-Z0-9_`".]){re.escape(col)}(?![a-zA-Z0-9_`"])', 
                 f'"{col_lower}"', 
                 sql, 
                 flags=re.IGNORECASE
             )
+            if sql_before != sql:
+                print(f"[DEBUG] Column name replacement modified the query")
+                # print(f"Before: {sql_before}")
+                # print(f"After:  {sql}")
+                # print("-"*40)
     
     # Handle backtick-quoted column names
+    sql_before = sql
     sql = re.sub(r'`([^`]+)`', r'"\1"', sql)
+    if sql_before != sql:
+        print(f"[DEBUG] Backtick replacement modified the query")
     
+    print("\n" + "="*80)
+    print(f"[DEBUG] Final SQL to be executed:\n{sql}")
+    print("="*80 + "\n")
     logger.info(f"Modified SQL: {sql}")
     
     try:
