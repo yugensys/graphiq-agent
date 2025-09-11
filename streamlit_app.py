@@ -158,7 +158,7 @@ def load_sentence_transformer():
 # ---------------------------
 # App Title
 # ---------------------------
-st.title("Agent Grapher: AI Chart Generator V19")
+st.title("Agent Grapher: AI Chart Generator")
 
 # Vector store (cached)
 vector_store = get_vector_store()
@@ -517,36 +517,9 @@ def render_chart(chart_config):
             st.plotly_chart(fig, use_container_width=True)
         
     except Exception as e:
-        import traceback
-        error_details = {
-            'error_type': type(e).__name__,
-            'error_message': str(e),
-            'traceback': traceback.format_exc(),
-            'chart_json': clean_json if 'clean_json' in locals() else 'Not available',
-            'chart_configs': chart_configs if 'chart_configs' in locals() else 'Not available',
-            'config': config if 'config' in locals() else 'Not available'
-        }
-        logger.error("Detailed error information: %s", json.dumps(error_details, indent=2, default=str))
-        
-        # Show a simplified error to the user
-        st.error(f"Error generating visualization: {str(e)}")
-        
-        # Show more details in an expander for debugging
-        with st.expander("Click for error details"):
-            st.write("### Error Details")
-            st.code(traceback.format_exc())
-            
-            if 'clean_json' in locals():
-                st.write("### Chart JSON")
-                st.code(clean_json)
-            
-            if 'chart_configs' in locals():
-                st.write("### Parsed Chart Configs")
-                st.json(chart_configs)
-            
-            if 'config' in locals():
-                st.write("### Current Chart Config")
-                st.json(config)
+        st.error(f"Error rendering chart: {str(e)}")
+        st.json(chart_config)  # For debugging
+        st.json(chart_config)  # Show the raw config for debugging
 
 def execute_sql_on_df(sql: str, df: pd.DataFrame, max_retries: int = 2) -> pd.DataFrame:
     """
@@ -579,21 +552,18 @@ def execute_sql_on_df(sql: str, df: pd.DataFrame, max_retries: int = 2) -> pd.Da
     df_clean.columns = [str(col).lower() for col in df_clean.columns]
     
     # Extract the table name if it exists - handle various quoting styles and special characters
-    table_match = re.search(
-        r'(?i)(from\s+)([`"\[\]]?[^\s`"\[\];]+)(?=\s|;|$)', 
-        sql
-    )
+    table_match = re.search(r'(?i)from\s+([`"\[\]]?[^\s`"\[\];]+(?:\s+[^\s`"\[\];]+)*[`"\[\]]?)(?:\s|;|$)', sql)
     if table_match:
-        prefix = table_match.group(1)  # "from "
-        original_table = table_match.group(2).strip('`"[]')
+        original_table = table_match.group(1).strip('`"[]')
         print(f"[DEBUG] Found table reference: '{original_table}'")
         logger.info(f"Found table reference: '{original_table}'")
         
-        # Replace ONLY the table reference, not the rest of the query
-        sql = sql[:table_match.start(2)] + "df_clean" + sql[table_match.end(2):]
-        print(f"[DEBUG] Replaced table name safely. New query:\n{sql}")
+        # Replace the entire matched table reference with 'df_clean'
+        sql = sql.replace(table_match.group(1), 'df_clean', 1)
+        print(f"[DEBUG] Replaced table name. New query:\n{sql}")
     else:
         print("[DEBUG] No table reference found in SQL query")
+        # If no FROM clause found, try to add one
         if "FROM" not in sql.upper() and "WHERE" in sql.upper():
             where_pos = sql.upper().find("WHERE")
             sql = sql[:where_pos] + "FROM df_clean " + sql[where_pos:]
@@ -601,6 +571,7 @@ def execute_sql_on_df(sql: str, df: pd.DataFrame, max_retries: int = 2) -> pd.Da
         elif "FROM" not in sql.upper():
             sql = sql + " FROM df_clean"
             print(f"[DEBUG] Added missing FROM clause at the end. New query:\n{sql}")
+    
     # Convert all column references to lowercase
     print("[DEBUG] Available columns in DataFrame:")
     for i, col in enumerate(df.columns, 1):
@@ -843,7 +814,6 @@ Return ONLY the insight text, no markdown or formatting."""
                 """Generate charts using DeepSeek based on the provided prompt and data."""
                 system_msg = (f'''You are a data visualization expert that creates beautiful, insightful charts using Plotly.
 
-
 IMPORTANT: Use this compact schema for charts. Example:
 [
   {{
@@ -868,10 +838,6 @@ RULES:
 5. Use simple color codes (hex or named colors)
 6. Max 2 charts per response
 7. Return ONLY the JSON, no markdown code blocks or additional text
-8. VERY IMPORTANT: Use ONLY the values and categories present in the provided sample_data. 
-   - Do NOT invent or assume missing categories.
-   - If a category is absent in sample_data, simply omit it from the chart.
-   - If sample_data has only one category/value, generate a chart with just that category/value.
 ''')
 
 
@@ -925,161 +891,82 @@ RULES:
                 import plotly.express as px
                 import plotly.graph_objects as go
                 
-                try:
-                    chart_configs = json.loads(clean_json)
-                    logger.info(f"Successfully parsed chart configs: {chart_configs}")
-                except json.JSONDecodeError as je:
-                    logger.error(f"Failed to parse JSON: {clean_json}")
-                    raise ValueError(f"Invalid JSON format in chart configuration: {str(je)}")
+                chart_configs = json.loads(clean_json)
                 
-                # Add validation
-                if not isinstance(chart_configs, list):
-                    logger.error(f"Expected list of chart configs, got: {type(chart_configs)}")
-                    st.error("Invalid chart configuration format. Expected a list of charts.")
-                    st.stop()
+                for config in chart_configs:
+                    chart_type = config.get('type', 'bar')
+                    title = config.get('title', 'Chart')
                     
-                if not chart_configs:
-                    logger.warning("Empty chart configurations list received")
-                    st.warning("No chart configurations were generated. Please try a different query.")
-                    st.stop()
-                
-                for i, config in enumerate(chart_configs, 1):
-                    try:
-                        logger.info(f"Processing chart {i}/{len(chart_configs)}")
+                    if chart_type == 'pie':
+                        fig = px.pie(
+                            values=config.get('values', []),
+                            names=config.get('labels', []),
+                            title=title,
+                            color_discrete_sequence=[config.get('color', '#4285F4')] if 'color' in config else None
+                        )
+                    else:
+                        # Create figure with primary y-axis
+                        fig = go.Figure()
                         
-                        if not isinstance(config, dict):
-                            logger.warning(f"Skipping invalid chart config (not a dictionary): {config}")
-                            st.warning(f"Skipping invalid chart configuration (not a dictionary)")
-                            continue
-                            
-                        chart_type = config.get('type', 'bar')
-                        title = config.get('title', 'Chart')
+                        # Add primary trace
+                        if chart_type == 'bar':
+                            fig.add_trace(go.Bar(
+                                x=config.get('x', []),
+                                y=config.get('y', []),
+                                name=config.get('y_label', 'Y'),
+                                marker_color=config.get('color', '#4285F4'),
+                                orientation=config.get('orientation', 'v')
+                            ))
+                        elif chart_type == 'line':
+                            fig.add_trace(go.Scatter(
+                                x=config.get('x', []),
+                                y=config.get('y', []),
+                                name=config.get('y_label', 'Y'),
+                                line=dict(color=config.get('color', '#4285F4')),
+                                mode='lines+markers'
+                            ))
+                        else:  # Default to scatter
+                            fig.add_trace(go.Scatter(
+                                x=config.get('x', []),
+                                y=config.get('y', []),
+                                name=config.get('y_label', 'Y'),
+                                mode='markers',
+                                marker=dict(color=config.get('color', '#4285F4'))
+                            ))
                         
-                        # Debug: Print the config being processed
-                        logger.info(f"Processing chart type: {chart_type} with config: {config}")
+                        # Add secondary trace if exists
+                        if 'y2' in config:
+                            fig.add_trace(go.Scatter(
+                                x=config.get('x', []),
+                                y=config.get('y2'),
+                                name=config.get('y2_label', 'Y2'),
+                                line=dict(color=config.get('color2', '#EA4335')),
+                                yaxis='y2'
+                            ))
                         
-                        # Validate required fields based on chart type
-                        if chart_type == 'pie':
-                            required = ['values', 'labels']
-                            if not all(key in config and config[key] for key in required):
-                                logger.warning(f"Skipping invalid pie chart config - missing required fields: {config}")
-                                st.warning(f"Skipping invalid pie chart: missing required fields (needs 'values' and 'labels')")
-                                continue
-                        else:
-                            required = ['x', 'y']
-                            if not all(key in config and config[key] for key in required):
-                                logger.warning(f"Skipping invalid {chart_type} chart config - missing required fields: {config}")
-                                st.warning(f"Skipping invalid {chart_type} chart: missing required fields (needs 'x' and 'y')")
-                                continue
-                        
-                        logger.info(f"Chart config validation passed: {config}")
-                        
-                        if chart_type == 'pie':
-                            fig = px.pie(
-                                values=config.get('values', []),
-                                names=config.get('labels', []),
-                                title=title,
-                                color_discrete_sequence=[config.get('color', '#4285F4')] if 'color' in config else None
-                            )
-                        else:
-                            # Create figure with primary y-axis
-                            fig = go.Figure()
-                            
-                            # Add primary trace
-                            if chart_type == 'bar':
-                                fig.add_trace(go.Bar(
-                                    x=config.get('x', []),
-                                    y=config.get('y', []),
-                                    name=config.get('y_label', 'Y'),
-                                    marker_color=config.get('color', '#4285F4'),
-                                    orientation=config.get('orientation', 'v')
-                                ))
-                            elif chart_type == 'line':
-                                fig.add_trace(go.Scatter(
-                                    x=config.get('x', []),
-                                    y=config.get('y', []),
-                                    name=config.get('y_label', 'Y'),
-                                    line=dict(color=config.get('color', '#4285F4')),
-                                    mode='lines+markers'
-                                ))
-                            else:  # Default to scatter
-                                fig.add_trace(go.Scatter(
-                                    x=config.get('x', []),
-                                    y=config.get('y', []),
-                                    name=config.get('y_label', 'Y'),
-                                    mode='markers',
-                                    marker=dict(color=config.get('color', '#4285F4'))
-                                ))
-                            
-                            # Add secondary trace if exists
-                            if 'y2' in config:
-                                fig.add_trace(go.Scatter(
-                                    x=config.get('x', []),
-                                    y=config.get('y2'),
-                                    name=config.get('y2_label', 'Y2'),
-                                    line=dict(color=config.get('color2', '#EA4335')),
-                                    yaxis='y2'
-                                ))
-                            
-                            # Update layout
-                            fig.update_layout(
-                                title=title,
-                                xaxis_title=config.get('x_label', 'X'),
-                                yaxis_title=config.get('y_label', 'Y'),
-                                yaxis2={
-                                    'title': config.get('y2_label', 'Y2'),
-                                    'overlaying': 'y',
-                                    'side': 'right',
-                                    'showgrid': False
-                                } if 'y2' in config else None,
-                                showlegend=True,
-                                hovermode='closest',
-                                margin=dict(l=50, r=50, t=50, b=50)
-                            )
-                        
-                        # Display the figure
-                        st.plotly_chart(fig, use_container_width=True)
-                        
-                    except Exception as chart_error:
-                        logger.exception(f"Error processing chart {i}: {str(chart_error)}")
-                        st.warning(f"Skipping chart {i} due to an error: {str(chart_error)}")
-                        continue
-                        
+                        # Update layout
+                        fig.update_layout(
+                            title=title,
+                            xaxis_title=config.get('x_label', 'X'),
+                            yaxis_title=config.get('y_label', 'Y'),
+                            yaxis2={
+                                'title': config.get('y2_label', 'Y2'),
+                                'overlaying': 'y',
+                                'side': 'right',
+                                'showgrid': False
+                            } if 'y2' in config else None,
+                            showlegend=True,
+                            hovermode='closest',
+                            margin=dict(l=50, r=50, t=50, b=50)
+                        )
+                    
+                    # Display the figure
+                    st.plotly_chart(fig, use_container_width=True)
+                    
             except json.JSONDecodeError as e:
                 st.error(f"Failed to parse chart configuration: {str(e)}")
-                logger.error(f"JSON decode error: {str(e)}\nJSON content: {clean_json}")
-                
             except Exception as e:
-                import traceback
-                error_details = {
-                    'error_type': type(e).__name__,
-                    'error_message': str(e),
-                    'traceback': traceback.format_exc(),
-                    'chart_json': clean_json if 'clean_json' in locals() else 'Not available',
-                    'chart_configs': chart_configs if 'chart_configs' in locals() else 'Not available',
-                    'config': config if 'config' in locals() else 'Not available'
-                }
-                logger.error("Detailed error information: %s", json.dumps(error_details, indent=2, default=str))
-                
-                # Show a simplified error to the user
-                st.error(f"Error generating visualization: {str(e)}")
-                
-                # Show more details in an expander for debugging
-                with st.expander("Click for error details"):
-                    st.write("### Error Details")
-                    st.code(traceback.format_exc())
-                    
-                    if 'clean_json' in locals():
-                        st.write("### Chart JSON")
-                        st.code(clean_json)
-                    
-                    if 'chart_configs' in locals():
-                        st.write("### Parsed Chart Configs")
-                        st.json(chart_configs)
-                    
-                    if 'config' in locals():
-                        st.write("### Current Chart Config")
-                        st.json(config)
+                st.error(f"Error generating chart: {str(e)}")
               # Generate insights after charts
 
             st.subheader("📊 Data Insights")
