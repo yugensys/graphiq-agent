@@ -221,34 +221,46 @@ class VectorStore:
         # Search the index
         distances, indices = self.index.search(query_embedding.astype('float32'), k)
         
+        # Debug information
+        if not hasattr(self, 'documents') or not self.documents:
+            logging.error("No documents found in vector store")
+            return []
+            
+        logging.info(f"Total documents in store: {len(self.documents)}")
+        logging.info(f"Indices from FAISS search: {indices}")
+        
         # Prepare results
         results = []
         for i, idx in enumerate(indices[0]):
-            if idx < 0:  # Skip invalid indices
+            if idx < 0 or idx >= len(self.documents):  # Skip invalid indices
+                logging.warning(f"Skipping invalid document index: {idx}")
                 continue
                 
-            doc = self.documents[idx]
-            
-            # Get metadata (default to empty dict if not present)
-            metadata = getattr(doc, 'metadata', {}) or {}
-            doc_file_hash = metadata.get('file_hash')
-            
-            # Skip if file_hash filter is provided and doesn't match
-            if file_hash and doc_file_hash != file_hash:
-                continue
+            try:
+                doc = self.documents[idx]
                 
-            # Convert L2 distance to similarity score (1 / (1 + distance))
-            distance = float(distances[0][i])
-            similarity = 1.0 / (1.0 + distance)
-            
-            if similarity >= score_threshold:
-                results.append({
-                    'id': metadata.get('id', ''),
-                    'text': getattr(doc, 'page_content', ''),
-                    'metadata': metadata,
-                    'score': similarity,
-                    'file_hash': doc_file_hash
-                })
+                # Get metadata (default to empty dict if not present)
+                metadata = getattr(doc, 'metadata', {}) or {}
+                doc_file_hash = metadata.get('file_hash')
+                
+                # Skip if file_hash filter is provided and doesn't match
+                if file_hash and doc_file_hash != file_hash:
+                    continue
+                    
+                # Convert L2 distance to similarity score (1 / (1 + distance))
+                distance = float(distances[0][i])
+                similarity = 1.0 / (1.0 + distance)
+                
+                if similarity >= score_threshold:
+                    results.append({
+                        'id': metadata.get('id', ''),
+                        'text': getattr(doc, 'page_content', ''),
+                        'metadata': metadata,
+                        'score': similarity,
+                        'file_hash': doc_file_hash
+                    })
+            except Exception as e:
+                logging.error(f"Error processing document: {e}")
         
         return results
 
@@ -302,6 +314,7 @@ def reset_database():
         shutil.rmtree("faiss_index")
         return True
     return False
+
 def get_or_create_collection(file_hash: str, vector_store: VectorStore) -> bool:
     """Check if a collection (file) exists in the vector store."""
     # In FAISS, we'll just check if we have any documents with this file_hash
