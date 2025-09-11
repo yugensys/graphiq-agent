@@ -288,6 +288,62 @@ def clean_sql(sql: str, mdl: DatasetMDL) -> str:
         return f'SELECT {cols} FROM "{mdl.dataset}" LIMIT 100;'
     return sql.strip().rstrip(";") + ";"
 
+# def generate_sql_query(
+#     natural_language_query: str,
+#     mdl: DatasetMDL,
+#     model_provider: Optional[str] = None,
+#     dataset_name: Optional[str] = None,
+#     use_rag: bool = False,  
+#     top_k: int = 3
+# ) -> str:
+#     """
+#     Convert a natural language query to SQL using MDL schema.
+
+#     Args:
+#         natural_language_query: Query string
+#         mdl: Dataset schema
+#         model_provider: LLM provider
+#         dataset_name: Dataset name (unused, kept for backward compatibility)
+#         use_rag: Not used, kept for backward compatibility
+#         top_k: Not used, kept for backward compatibility
+
+#     Returns:
+#         SQL query string
+#     """
+#     try:
+#         # Get the LLM provider
+#         llm = get_llm_provider(provider=model_provider)
+        
+#         # Create prompt with schema
+#         prompt = f"""
+#         You are an expert SQL generator. 
+#         Your task is to create the most appropriate SQL query for a given natural language question.
+
+#         Database schema:
+#         {mdl_to_text(mdl)}
+
+#         Guidelines:
+#         - Always choose the minimum set of columns needed to answer the question.
+#         - If the query asks for a ratio, percentage, distribution, or comparison, 
+#         use GROUP BY with aggregation (COUNT, SUM, AVG, etc.).
+#         - For "pie chart", "ratio", or "distribution", return grouped counts or proportions.
+#         - Do not SELECT all columns unless explicitly requested.
+#         - Always alias aggregate columns with meaningful names (e.g., gender_count, total_users).
+#         - Use the exact dataset name: "{mdl.dataset}" as the table.
+
+#         Natural language query: {natural_language_query}
+
+#         SQL query:
+#         """
+
+#         sql = llm.generate(prompt).strip()
+#         resulting_sql=clean_sql(sql, mdl)
+#         return resulting_sql
+#     except Exception as e:
+#         logger.error(f"SQL generation error: {e}")
+#         cols = ", ".join([f'"{f.name}"' for f in mdl.fields])
+#         return f'SELECT {cols} FROM "{mdl.dataset}" LIMIT 100;'
+
 def generate_sql_query(
     natural_language_query: str,
     mdl: DatasetMDL,
@@ -298,23 +354,13 @@ def generate_sql_query(
 ) -> str:
     """
     Convert a natural language query to SQL using MDL schema.
-
-    Args:
-        natural_language_query: Query string
-        mdl: Dataset schema
-        model_provider: LLM provider
-        dataset_name: Dataset name (unused, kept for backward compatibility)
-        use_rag: Not used, kept for backward compatibility
-        top_k: Not used, kept for backward compatibility
-
-    Returns:
-        SQL query string
+    If the query does not align with the dataset schema, return "INVALID QUERY".
     """
     try:
         # Get the LLM provider
         llm = get_llm_provider(provider=model_provider)
         
-        # Create prompt with schema
+        # Create prompt with schema + strict instructions
         prompt = f"""
         You are an expert SQL generator. 
         Your task is to create the most appropriate SQL query for a given natural language question.
@@ -323,9 +369,13 @@ def generate_sql_query(
         {mdl_to_text(mdl)}
 
         Guidelines:
+        - Only generate SQL queries that can be executed on this schema.
+        - If the natural language query refers to columns, tables, or concepts NOT present in the schema, 
+          or is ambiguous and cannot be mapped with high confidence, output exactly:
+          INVALID QUERY
         - Always choose the minimum set of columns needed to answer the question.
         - If the query asks for a ratio, percentage, distribution, or comparison, 
-        use GROUP BY with aggregation (COUNT, SUM, AVG, etc.).
+          use GROUP BY with aggregation (COUNT, SUM, AVG, etc.).
         - For "pie chart", "ratio", or "distribution", return grouped counts or proportions.
         - Do not SELECT all columns unless explicitly requested.
         - Always alias aggregate columns with meaningful names (e.g., gender_count, total_users).
@@ -333,17 +383,24 @@ def generate_sql_query(
 
         Natural language query: {natural_language_query}
 
-        SQL query:
+        Respond with either:
+        1. A valid SQL query based strictly on the schema, OR
+        2. The text "INVALID QUERY" (no explanation).
         """
 
         sql = llm.generate(prompt).strip()
-        resulting_sql=clean_sql(sql, mdl)
+
+        if sql == "INVALID QUERY":
+            logger.error("9999 Invalid query generated")
+            return sql  # propagate upwards
+
+        resulting_sql = clean_sql(sql, mdl)
         return resulting_sql
+
     except Exception as e:
         logger.error(f"SQL generation error: {e}")
         cols = ", ".join([f'"{f.name}"' for f in mdl.fields])
         return f'SELECT {cols} FROM "{mdl.dataset}" LIMIT 100;'
-
 
 # ---------------------------------------------------------------------------
 # CSV to DataFrame

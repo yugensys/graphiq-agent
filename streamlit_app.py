@@ -387,7 +387,7 @@ if dataset_choice and dataset_choice != "(Select)":
         st.sidebar.info(f"Loading local dataset: {dataset_choice}")
         file_hash = ensure_collection_for_file(pseudo_uploaded, vector_store)
         if file_hash:
-            # 🚨 Cancel any uploaded file when a dataset is selected
+            # Cancel any uploaded file when a dataset is selected
             st.session_state.last_uploaded_file = None
             st.session_state.df = st.session_state.df  # keep current DF
             st.session_state.uploaded_file = None
@@ -763,38 +763,44 @@ def execute_sql_on_df(sql: str, df: pd.DataFrame, max_retries: int = 2) -> pd.Da
             )
 
 if st.button("Generate Charts") and user_prompt:
-    with st.spinner("Analyzing your data…"):
-        try:
-            model = load_sentence_transformer()
-            query_embedding = model.encode(user_prompt, convert_to_numpy=True).tolist()
+    try:
+        model = load_sentence_transformer()
+        query_embedding = model.encode(user_prompt, convert_to_numpy=True).tolist()
 
-            # Similarity search across file collection (rows + mdl)
-            similar_docs = vector_store.similarity_search(
-                query_embedding=query_embedding,
-                k=100,
-                file_hash=st.session_state.current_file_hash,
-            )
+        # Similarity search across file collection (rows + mdl)
+        similar_docs = vector_store.similarity_search(
+            query_embedding=query_embedding,
+            k=100,
+            file_hash=st.session_state.current_file_hash,
+        )
 
-            # Determine whether the top result is MDL
-            top_is_mdl = False
-            top_doc = None
-            if similar_docs:
-                top_doc = similar_docs[0]
-                top_meta = top_doc.get("metadata", {}) or top_doc.get("meta", {}) or {}
-                top_is_mdl = top_meta.get("type") == "mdl" or (top_doc.get("id", "").endswith("_mdl"))
+        # Determine whether the top result is MDL
+        top_is_mdl = False
+        top_doc = None
+        if similar_docs:
+            top_doc = similar_docs[0]
+            top_meta = top_doc.get("metadata", {}) or top_doc.get("meta", {}) or {}
+            top_is_mdl = top_meta.get("type") == "mdl" or (top_doc.get("id", "").endswith("_mdl"))
 
-            # If top match is MDL, ask LLM to produce SQL, execute it, and use result for chart generation
-            query_result_df = None
-            generated_sql = None
+        # If top match is MDL, ask LLM to produce SQL, execute it, and use result for chart generation
+        query_result_df = None
+        generated_sql = None
 
-            if top_is_mdl and st.session_state.mdl is not None:
-                # Use MDL-aware SQL generation
-                try:
-                    generated_sql = generate_sql_query(
-                        natural_language_query=user_prompt,
-                        mdl=st.session_state.mdl,
-                        dataset_name=st.session_state.current_file_hash,
-                    )
+        if top_is_mdl and st.session_state.mdl is not None:
+            # Use MDL-aware SQL generation
+            try:
+                generated_sql = generate_sql_query(
+                    natural_language_query=user_prompt,
+                    mdl=st.session_state.mdl,
+                    dataset_name=st.session_state.current_file_hash,
+                )
+                # Check for INVALID QUERY before starting the spinner
+                if isinstance(generated_sql, str) and generated_sql.strip().upper() == "INVALID QUERY":
+                    st.warning("⚠️ The query appears unrelated to this dataset. Please rephrase or try another dataset.")
+                    st.stop()
+                    
+                with st.spinner("Analyzing your data…"):
+                    logger.info(f"Generated SQL: {generated_sql}")
                     st.sidebar.code(generated_sql, language="sql")
 
                     # Execute SQL on in-memory df
@@ -825,72 +831,72 @@ if st.button("Generate Charts") and user_prompt:
                         )
                     
                     st.sidebar.success(f"✅ SQL executed: {len(query_result_df)} rows returned")
-                except Exception as e:
-                    logger.exception("SQL generation/execution failed: %s", e)
-                    st.sidebar.error(f"SQL generation/execution failed: {e}")
-                    query_result_df = st.session_state.df.head(100)
-            else:
-                # Fallback: use top similar rows as context (or sample of df)
-                if similar_docs:
-                    # Build a small dataframe from returned docs' metadata if available
-                    rows = []
-                    for d in similar_docs:
-                        meta = d.get("metadata") or d.get("meta") or {}
-                        # we expect metadata to be original row dict
-                        if isinstance(meta, dict) and set(meta.keys()) & set(st.session_state.df.columns):
-                            rows.append(meta)
-                    if rows:
-                        query_result_df = pd.DataFrame(rows)
-                    else:
-                        query_result_df = st.session_state.df.head(100)
+            except Exception as e:
+                logger.exception("SQL generation/execution failed: %s", e)
+                st.sidebar.error(f"SQL generation/execution failed: {e}")
+                query_result_df = st.session_state.df.head(100)
+        else:
+            # Fallback: use top similar rows as context (or sample of df)
+            if similar_docs:
+                # Build a small dataframe from returned docs' metadata if available
+                rows = []
+                for d in similar_docs:
+                    meta = d.get("metadata") or d.get("meta") or {}
+                    # we expect metadata to be original row dict
+                    if isinstance(meta, dict) and set(meta.keys()) & set(st.session_state.df.columns):
+                        rows.append(meta)
+                if rows:
+                    query_result_df = pd.DataFrame(rows)
                 else:
                     query_result_df = st.session_state.df.head(100)
+            else:
+                query_result_df = st.session_state.df.head(100)
 
-            def get_llm_provider():
-                """Initialize and return the LLM provider (DeepSeek)."""
-                import requests
+        def get_llm_provider():
+            """Initialize and return the LLM provider (DeepSeek)."""
+            import requests
+            
+            api_key = os.getenv("DEEPSEEK_API_KEY")
+            if not api_key:
+                raise ValueError("DEEPSEEK_API_KEY environment variable not set")
+            
+            def generate(prompt: str) -> str:
+                headers = {
+                    "Authorization": f"Bearer {api_key}",
+                    "Content-Type": "application/json"
+                }
                 
-                api_key = os.getenv("DEEPSEEK_API_KEY")
-                if not api_key:
-                    raise ValueError("DEEPSEEK_API_KEY environment variable not set")
+                data = {
+                    "model": "deepseek-chat",
+                    "messages": [
+                        {"role": "user", "content": prompt}
+                    ],
+                    "temperature": 0.7,
+                    "max_tokens": 1000
+                }
                 
-                def generate(prompt: str) -> str:
-                    headers = {
-                        "Authorization": f"Bearer {api_key}",
-                        "Content-Type": "application/json"
-                    }
-                    
-                    data = {
-                        "model": "deepseek-chat",
-                        "messages": [
-                            {"role": "user", "content": prompt}
-                        ],
-                        "temperature": 0.7,
-                        "max_tokens": 1000
-                    }
-                    
-                    try:
-                        response = requests.post(
-                            DEEPSEEK_API_URL,
-                            headers=headers,
-                            json=data
-                        )
-                        response.raise_for_status()
-                        return response.json()["choices"][0]["message"]["content"]
-                    except requests.RequestException as e:
-                        logger.error(f"Error calling DeepSeek API: {str(e)}")
-                        raise RuntimeError(f"Failed to call DeepSeek API: {str(e)}")
-                
-                class LLMProvider:
-                    def __init__(self):
-                        self.generate = generate
-                
-                return LLMProvider()
+                try:
+                    response = requests.post(
+                        DEEPSEEK_API_URL,
+                        headers=headers,
+                        json=data
+                    )
+                    response.raise_for_status()
+                    return response.json()["choices"][0]["message"]["content"]
+                except requests.RequestException as e:
+                    logger.error(f"Error calling DeepSeek API: {str(e)}")
+                    raise RuntimeError(f"Failed to call DeepSeek API: {str(e)}")
+            
+            class LLMProvider:
+                def __init__(self):
+                    self.generate = generate
+            
+            return LLMProvider()
 
-            def generate_insights(prompt_text, sample_data, generated_sql=None):
-                """Generate concise 2-3 sentence data insights based on the SQL output."""
-                
-                system_msg = """You are a data analyst that provides clear, concise insights from data.
+        def generate_insights(prompt_text, sample_data, generated_sql=None):
+            """Generate concise 2-3 sentence data insights based on the SQL output."""
+            
+            system_msg = """You are a data analyst that provides clear, concise insights from data.
 
 
 
@@ -910,267 +916,267 @@ RULES:
 
 Return ONLY the insight text, no markdown or formatting."""
 
-                user_msg = (
-                    f"User query: {prompt_text}\n"
-                    f"Data columns: {list(sample_data[0].keys()) if sample_data else 'No data'}\n"
-                    f"Sample data: {json.dumps(sample_data[:3], default=str) if sample_data else 'No data'}\n"
-                    f"SQL context: {generated_sql if generated_sql else 'No SQL'}\n\n"
-                    "Provide a 2-3 sentence insight about the most important trend or finding in this data."
-                )
+            user_msg = (
+                f"User query: {prompt_text}\n"
+                f"Data columns: {list(sample_data[0].keys()) if sample_data else 'No data'}\n"
+                f"Sample data: {json.dumps(sample_data[:3], default=str) if sample_data else 'No data'}\n"
+                f"SQL context: {generated_sql if generated_sql else 'No SQL'}\n\n"
+                "Provide a 2-3 sentence insight about the most important trend or finding in this data."
+            )
 
-                try:
-                    llm = get_llm_provider()
-                    prompt = f"{system_msg}\n\n{user_msg}"
-                    logger.info("Generating concise insights...")
-                    insight = llm.generate(prompt).strip()
-
-                    # Clean up the response
-                    insight = insight.strip('"\'')  # Remove any surrounding quotes
-                    if insight.startswith('Insight: '):
-                        insight = insight[9:]  # Remove 'Insight: ' prefix if present
-                        
-                    return insight
-
-                except Exception as e:
-                    logger.exception("Error generating insights")
-                    return None
-
-
-
-            def generate_charts(prompt_text, sample_data, generated_sql=None):
-                """Generate charts using DeepSeek based on the provided prompt and data."""
-                system_msg = (f'''You are a data visualization expert that creates beautiful, insightful charts using Plotly.
-                IMPORTANT: Use this compact schema for charts. Example:
-                [
-                {{
-                    "type": "bar",  // bar, line, pie, scatter, box, etc.
-                    "title": "Chart Title",
-                    "x": ["A", "B", "C"],  // X values or categories
-                    "y": [10, 20, 30],      // Y values
-                    "y2": [5, 15, 25],      // Optional: Secondary Y values
-                    "marker_color": "#4285F4",     // Optional: Color for main trace (use marker_color for single color)
-                    "marker_colors": ["#4285F4", "#EA4335"],  // Optional: Colors for multiple traces or pie segments
-                    "x_label": "X Axis",    // Optional: X-axis label
-                    "y_label": "Y Axis",    // Optional: Y-axis label
-                    "orientation": "v"      // Optional: "h" for horizontal bars
-                }}
-                ]
-                RULES:
-                1. ALWAYS return a valid JSON array of chart objects
-                2. For bar/line/scatter: 'x' and 'y' are required
-                3. For pie: 'labels' and 'values' are required
-                4. Keep it minimal - no unnecessary fields
-                5. Use simple color codes (hex or named colors)
-                6. Max 2 charts per response
-                7. Return ONLY the JSON, no markdown code blocks or additional text
-                8. VERY IMPORTANT: Use ONLY the values and categories present in the provided sample_data. 
-                - Do NOT invent or assume missing categories.
-                - If a category is absent in sample_data, simply omit it from the chart.
-                - If sample_data has only one category/value, generate a chart with just that category/value.
-                ''')
-                user_msg = (
-                    f"User query: {prompt_text}\n"
-                    f"Available columns: {list(st.session_state.df.columns)}\n"
-                    f"Sample data (top rows for charting): {json.dumps(sample_data, default=str)}\n"
-                    f"Context: {'MDL-based SQL used' if generated_sql else 'Row-level similarity context used'}\n\n"
-                    "Generate at most 2 different visualizations that best represent this data.\n"
-                    "Return only valid JSON as described."
-                )
-
-
-                try:
-                    llm = get_llm_provider()
-                    prompt = f"{system_msg}\n\n{user_msg}"
-                    print("CHART GENERATION 6677: Prompt:", prompt)
-                    return llm.generate(prompt).strip()
-                except Exception as e:
-                    logger.exception("Error generating visualization with DeepSeek")
-                    st.error(f"Failed to generate visualization: {str(e)}")
-                    return None
-
-            # Generate charts with compact schema
-            sample_data = query_result_df.head(12).to_dict(orient='records')
-            # sample_data = query_result_df.to_dict(orient='records')
-            chart_json = generate_charts(user_prompt, sample_data, generated_sql)
-            
-            if not chart_json:
-                st.warning("The model returned an empty response. Please try rephrasing your query.")
-                st.stop()
-
-            st.subheader("Visualized Charts")
-            with st.expander("Debug: Raw LLM Response"):
-                st.code(chart_json, language="json")
-                if generated_sql:
-                    st.write("### SQL used")
-                    st.code(generated_sql, language="sql")
-            
-            # Clean the JSON response
-            clean_json = chart_json.strip()
-            if clean_json.startswith("```json"):
-                clean_json = clean_json[len("```json"):].strip()
-            if clean_json.startswith("```"):
-                clean_json = clean_json[3:].strip()
-            if clean_json.endswith("```"):
-                clean_json = clean_json[:-3].strip()
-                
             try:
-                # Parse the compact chart config
-                import plotly.express as px
-                import plotly.graph_objects as go
-                
+                llm = get_llm_provider()
+                prompt = f"{system_msg}\n\n{user_msg}"
+                logger.info("Generating concise insights...")
+                insight = llm.generate(prompt).strip()
 
-                chart_configs = json.loads(clean_json)
-                # Add validation
-                if not isinstance(chart_configs, list) or not chart_configs:
-                    st.error("No valid chart configurations were generated. Please try a different query.")
-                    st.stop()
-                
-                for config in chart_configs:
-                    if not isinstance(config, dict):
-                        continue
-                    chart_type = config.get('type', 'bar')
-                    title = config.get('title', 'Chart')
-                    # Skip if required fields are missing
-                    if chart_type == 'pie':
-                        if not all(key in config for key in ['values', 'labels']) or not config['values'] or not config['labels']:
-                            st.warning(f"Skipping invalid pie chart config: missing required fields")
-                            continue
-                    else:
-                        if not all(key in config for key in ['x', 'y']) or not config['x'] or not config['y']:
-                            st.warning(f"Skipping invalid {chart_type} chart config: missing required fields")
-                            continue
-                    if chart_type == 'pie':
-                        fig = px.pie(
-                            values=config.get('values', []),
-                            names=config.get('labels', []),
-                            title=title,
-                            color_discrete_sequence=[config.get('color', '#4285F4')] if 'color' in config else None
-                        )
-                    else:
-                        # Create figure with primary y-axis
-                        fig = go.Figure()
-                        
-                        # Add primary trace
-                        if chart_type == 'bar':
-                            fig.add_trace(go.Bar(
-                                x=config.get('x', []),
-                                y=config.get('y', []),
-                                name=config.get('y_label', 'Y'),
-                                marker_color=config.get('color', '#4285F4'),
-                                orientation=config.get('orientation', 'v')
-                            ))
-                        elif chart_type == 'line':
-                            fig.add_trace(go.Scatter(
-                                x=config.get('x', []),
-                                y=config.get('y', []),
-                                name=config.get('y_label', 'Y'),
-                                line=dict(color=config.get('color', '#4285F4')),
-                                mode='lines+markers'
-                            ))
-                        else:  # Default to scatter
-                            fig.add_trace(go.Scatter(
-                                x=config.get('x', []),
-                                y=config.get('y', []),
-                                name=config.get('y_label', 'Y'),
-                                mode='markers',
-                                marker=dict(color=config.get('color', '#4285F4'))
-                            ))
-                        
-                        # Add secondary trace if exists
-                        if 'y2' in config:
-                            fig.add_trace(go.Scatter(
-                                x=config.get('x', []),
-                                y=config.get('y2'),
-                                name=config.get('y2_label', 'Y2'),
-                                line=dict(color=config.get('color2', '#EA4335')),
-                                yaxis='y2'
-                            ))
-                        
-                        # Update layout
-                        fig.update_layout(
-                            title=title,
-                            xaxis_title=config.get('x_label', 'X'),
-                            yaxis_title=config.get('y_label', 'Y'),
-                            yaxis2={
-                                'title': config.get('y2_label', 'Y2'),
-                                'overlaying': 'y',
-                                'side': 'right',
-                                'showgrid': False
-                            } if 'y2' in config else None,
-                            showlegend=True,
-                            hovermode='closest',
-                            margin=dict(l=50, r=50, t=50, b=50)
-                        )
+                # Clean up the response
+                insight = insight.strip('"\'')  # Remove any surrounding quotes
+                if insight.startswith('Insight: '):
+                    insight = insight[9:]  # Remove 'Insight: ' prefix if present
                     
-                    # Display the figure
-                    st.plotly_chart(fig, use_container_width=True)
-                    
-            except json.JSONDecodeError as e:
-                st.error(f"Failed to parse chart configuration: {str(e)}")
+                return insight
+
             except Exception as e:
-                import traceback
-                error_details = {
-                    'error_type': type(e).__name__,
-                    'error_message': str(e),
-                    'traceback': traceback.format_exc(),
-                    'chart_json': clean_json if 'clean_json' in locals() else 'Not available',
-                    'chart_configs': chart_configs if 'chart_configs' in locals() else 'Not available',
-                    'config': config if 'config' in locals() else 'Not available'
-                }
-                logger.error("Detailed error information: %s", json.dumps(error_details, indent=2, default=str))
-                
-                # Show a simplified error to the user
-                st.error(f"Error generating visualization: {str(e)}")
-                
-                # Show more details in an expander for debugging
-                with st.expander("Click for error details"):
-                    st.write("### Error Details")
-                    st.code(traceback.format_exc())
-                    
-                    if 'clean_json' in locals():
-                        st.write("### Chart JSON")
-                        st.code(clean_json)
-                    
-                    if 'chart_configs' in locals():
-                        st.write("### Parsed Chart Configs")
-                        st.json(chart_configs)
-                    
-                    if 'config' in locals():
-                        st.write("### Current Chart Config")
-                        st.json(config)
-              # Generate insights after charts
+                logger.exception("Error generating insights")
+                return None
 
-            st.subheader("📊 Data Insights")
 
-            with st.spinner("Generating insights..."):
 
-                insights = generate_insights(user_prompt, sample_data, generated_sql)
+        def generate_charts(prompt_text, sample_data, generated_sql=None):
+            """Generate charts using DeepSeek based on the provided prompt and data."""
+            system_msg = (f'''You are a data visualization expert that creates beautiful, insightful charts using Plotly.
+            IMPORTANT: Use this compact schema for charts. Example:
+            [
+            {{
+                "type": "bar",  // bar, line, pie, scatter, box, etc.
+                "title": "Chart Title",
+                "x": ["A", "B", "C"],  // X values or categories
+                "y": [10, 20, 30],      // Y values
+                "y2": [5, 15, 25],      // Optional: Secondary Y values
+                "marker_color": "#4285F4",     // Optional: Color for main trace (use marker_color for single color)
+                "marker_colors": ["#4285F4", "#EA4335"],  // Optional: Colors for multiple traces or pie segments
+                "x_label": "X Axis",    // Optional: X-axis label
+                "y_label": "Y Axis",    // Optional: Y-axis label
+                "orientation": "v"      // Optional: "h" for horizontal bars
+            }}
+            ]
+            RULES:
+            1. ALWAYS return a valid JSON array of chart objects
+            2. For bar/line/scatter: 'x' and 'y' are required
+            3. For pie: 'labels' and 'values' are required
+            4. Keep it minimal - no unnecessary fields
+            5. Use simple color codes (hex or named colors)
+            6. Max 2 charts per response
+            7. Return ONLY the JSON, no markdown code blocks or additional text
+            8. VERY IMPORTANT: Use ONLY the values and categories present in the provided sample_data. 
+            - Do NOT invent or assume missing categories.
+            - If a category is absent in sample_data, simply omit it from the chart.
+            - If sample_data has only one category/value, generate a chart with just that category/value.
+            ''')
+            user_msg = (
+                f"User query: {prompt_text}\n"
+                f"Available columns: {list(st.session_state.df.columns)}\n"
+                f"Sample data (top rows for charting): {json.dumps(sample_data, default=str)}\n"
+                f"Context: {'MDL-based SQL used' if generated_sql else 'Row-level similarity context used'}\n\n"
+                "Generate at most 2 different visualizations that best represent this data.\n"
+                "Return only valid JSON as described."
+            )
 
-                
 
-                if insights:
+            try:
+                llm = get_llm_provider()
+                prompt = f"{system_msg}\n\n{user_msg}"
+                print("CHART GENERATION 6677: Prompt:", prompt)
+                return llm.generate(prompt).strip()
+            except Exception as e:
+                logger.exception("Error generating visualization with DeepSeek")
+                st.error(f"Failed to generate visualization: {str(e)}")
+                return None
 
-                    # Display insights as a clean paragraph
+        # Generate charts with compact schema
+        sample_data = query_result_df.head(12).to_dict(orient='records')
+        # sample_data = query_result_df.to_dict(orient='records')
+        chart_json = generate_charts(user_prompt, sample_data, generated_sql)
+        
+        if not chart_json:
+            st.warning("The model returned an empty response. Please try rephrasing your query.")
+            st.stop()
 
-                    st.markdown("### Key Findings:")
+        st.subheader("Visualized Charts")
+        with st.expander("Debug: Raw LLM Response"):
+            st.code(chart_json, language="json")
+            if generated_sql:
+                st.write("### SQL used")
+                st.code(generated_sql, language="sql")
+        
+        # Clean the JSON response
+        clean_json = chart_json.strip()
+        if clean_json.startswith("```json"):
+            clean_json = clean_json[len("```json"):].strip()
+        if clean_json.startswith("```"):
+            clean_json = clean_json[3:].strip()
+        if clean_json.endswith("```"):
+            clean_json = clean_json[:-3].strip()
+            
+        try:
+            # Parse the compact chart config
+            import plotly.express as px
+            import plotly.graph_objects as go
+            
 
-                    st.markdown(insights)
-
-                    
-
-                    # Add insights to expandable section for debugging
-
-                    # with st.expander("Debug: Raw Insights Response"):
-
-                    #     st.text(insights)
-
+            chart_configs = json.loads(clean_json)
+            # Add validation
+            if not isinstance(chart_configs, list) or not chart_configs:
+                st.error("No valid chart configurations were generated. Please try a different query.")
+                st.stop()
+            
+            for config in chart_configs:
+                if not isinstance(config, dict):
+                    continue
+                chart_type = config.get('type', 'bar')
+                title = config.get('title', 'Chart')
+                # Skip if required fields are missing
+                if chart_type == 'pie':
+                    if not all(key in config for key in ['values', 'labels']) or not config['values'] or not config['labels']:
+                        st.warning(f"Skipping invalid pie chart config: missing required fields")
+                        continue
                 else:
+                    if not all(key in config for key in ['x', 'y']) or not config['x'] or not config['y']:
+                        st.warning(f"Skipping invalid {chart_type} chart config: missing required fields")
+                        continue
+                if chart_type == 'pie':
+                    fig = px.pie(
+                        values=config.get('values', []),
+                        names=config.get('labels', []),
+                        title=title,
+                        color_discrete_sequence=[config.get('color', '#4285F4')] if 'color' in config else None
+                    )
+                else:
+                    # Create figure with primary y-axis
+                    fig = go.Figure()
+                    
+                    # Add primary trace
+                    if chart_type == 'bar':
+                        fig.add_trace(go.Bar(
+                            x=config.get('x', []),
+                            y=config.get('y', []),
+                            name=config.get('y_label', 'Y'),
+                            marker_color=config.get('color', '#4285F4'),
+                            orientation=config.get('orientation', 'v')
+                        ))
+                    elif chart_type == 'line':
+                        fig.add_trace(go.Scatter(
+                            x=config.get('x', []),
+                            y=config.get('y', []),
+                            name=config.get('y_label', 'Y'),
+                            line=dict(color=config.get('color', '#4285F4')),
+                            mode='lines+markers'
+                        ))
+                    else:  # Default to scatter
+                        fig.add_trace(go.Scatter(
+                            x=config.get('x', []),
+                            y=config.get('y', []),
+                            name=config.get('y_label', 'Y'),
+                            mode='markers',
+                            marker=dict(color=config.get('color', '#4285F4'))
+                        ))
+                    
+                    # Add secondary trace if exists
+                    if 'y2' in config:
+                        fig.add_trace(go.Scatter(
+                            x=config.get('x', []),
+                            y=config.get('y2'),
+                            name=config.get('y2_label', 'Y2'),
+                            line=dict(color=config.get('color2', '#EA4335')),
+                            yaxis='y2'
+                        ))
+                    
+                    # Update layout
+                    fig.update_layout(
+                        title=title,
+                        xaxis_title=config.get('x_label', 'X'),
+                        yaxis_title=config.get('y_label', 'Y'),
+                        yaxis2={
+                            'title': config.get('y2_label', 'Y2'),
+                            'overlaying': 'y',
+                            'side': 'right',
+                            'showgrid': False
+                        } if 'y2' in config else None,
+                        showlegend=True,
+                        hovermode='closest',
+                        margin=dict(l=50, r=50, t=50, b=50)
+                    )
+                
+                # Display the figure
+                st.plotly_chart(fig, use_container_width=True)
+                
+        except json.JSONDecodeError as e:
+            st.error(f"Failed to parse chart configuration: {str(e)}")
+        except Exception as e:
+            import traceback
+            error_details = {
+                'error_type': type(e).__name__,
+                'error_message': str(e),
+                'traceback': traceback.format_exc(),
+                'chart_json': clean_json if 'clean_json' in locals() else 'Not available',
+                'chart_configs': chart_configs if 'chart_configs' in locals() else 'Not available',
+                'config': config if 'config' in locals() else 'Not available'
+            }
+            logger.error("Detailed error information: %s", json.dumps(error_details, indent=2, default=str))
+            
+            # Show a simplified error to the user
+            st.error(f"Error generating visualization: {str(e)}")
+            
+            # Show more details in an expander for debugging
+            with st.expander("Click for error details"):
+                st.write("### Error Details")
+                st.code(traceback.format_exc())
+                
+                if 'clean_json' in locals():
+                    st.write("### Chart JSON")
+                    st.code(clean_json)
+                
+                if 'chart_configs' in locals():
+                    st.write("### Parsed Chart Configs")
+                    st.json(chart_configs)
+                
+                if 'config' in locals():
+                    st.write("### Current Chart Config")
+                    st.json(config)
+          # Generate insights after charts
 
-                    st.warning("Could not generate insights. Please try again.")
+        st.subheader("📊 Data Insights")
+
+        with st.spinner("Generating insights..."):
+
+            insights = generate_insights(user_prompt, sample_data, generated_sql)
+
+            
+
+            if insights:
+
+                # Display insights as a clean paragraph
+
+                st.markdown("### Key Findings:")
+
+                st.markdown(insights)
+
+                
+
+                # Add insights to expandable section for debugging
+
+                # with st.expander("Debug: Raw Insights Response"):
+
+                #     st.text(insights)
+
+            else:
+
+                st.warning("Could not generate insights. Please try again.")
         
 
-        except RuntimeError as e:
-            st.error(str(e))
-        except Exception as e:
-            logger.exception("Error generating visualization: %s", e)
-            st.error(f"Error generating visualization: {e}")
+    except RuntimeError as e:
+        st.error(str(e))
+    except Exception as e:
+        logger.exception("Error generating visualization: %s", e)
+        st.error(f"Error generating visualization: {e}")
