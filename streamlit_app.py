@@ -158,7 +158,7 @@ def load_sentence_transformer():
 # ---------------------------
 # App Title
 # ---------------------------
-st.title("Agent Grapher: AI Chart Generator V18")
+st.title("Agent Grapher: AI Chart Generator V19")
 
 # Vector store (cached)
 vector_store = get_vector_store()
