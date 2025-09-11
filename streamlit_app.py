@@ -517,9 +517,36 @@ def render_chart(chart_config):
             st.plotly_chart(fig, use_container_width=True)
         
     except Exception as e:
-        st.error(f"Error rendering chart: {str(e)}")
-        st.json(chart_config)  # For debugging
-        st.json(chart_config)  # Show the raw config for debugging
+        import traceback
+        error_details = {
+            'error_type': type(e).__name__,
+            'error_message': str(e),
+            'traceback': traceback.format_exc(),
+            'chart_json': clean_json if 'clean_json' in locals() else 'Not available',
+            'chart_configs': chart_configs if 'chart_configs' in locals() else 'Not available',
+            'config': config if 'config' in locals() else 'Not available'
+        }
+        logger.error("Detailed error information: %s", json.dumps(error_details, indent=2, default=str))
+        
+        # Show a simplified error to the user
+        st.error(f"Error generating visualization: {str(e)}")
+        
+        # Show more details in an expander for debugging
+        with st.expander("Click for error details"):
+            st.write("### Error Details")
+            st.code(traceback.format_exc())
+            
+            if 'clean_json' in locals():
+                st.write("### Chart JSON")
+                st.code(clean_json)
+            
+            if 'chart_configs' in locals():
+                st.write("### Parsed Chart Configs")
+                st.json(chart_configs)
+            
+            if 'config' in locals():
+                st.write("### Current Chart Config")
+                st.json(config)
 
 def execute_sql_on_df(sql: str, df: pd.DataFrame, max_retries: int = 2) -> pd.DataFrame:
     """
@@ -988,7 +1015,36 @@ RULES:
             except json.JSONDecodeError as e:
                 st.error(f"Failed to parse chart configuration: {str(e)}")
             except Exception as e:
-                st.error(f"Error generating chart: {str(e)}")
+                import traceback
+                error_details = {
+                    'error_type': type(e).__name__,
+                    'error_message': str(e),
+                    'traceback': traceback.format_exc(),
+                    'chart_json': clean_json if 'clean_json' in locals() else 'Not available',
+                    'chart_configs': chart_configs if 'chart_configs' in locals() else 'Not available',
+                    'config': config if 'config' in locals() else 'Not available'
+                }
+                logger.error("Detailed error information: %s", json.dumps(error_details, indent=2, default=str))
+                
+                # Show a simplified error to the user
+                st.error(f"Error generating visualization: {str(e)}")
+                
+                # Show more details in an expander for debugging
+                with st.expander("Click for error details"):
+                    st.write("### Error Details")
+                    st.code(traceback.format_exc())
+                    
+                    if 'clean_json' in locals():
+                        st.write("### Chart JSON")
+                        st.code(clean_json)
+                    
+                    if 'chart_configs' in locals():
+                        st.write("### Parsed Chart Configs")
+                        st.json(chart_configs)
+                    
+                    if 'config' in locals():
+                        st.write("### Current Chart Config")
+                        st.json(config)
               # Generate insights after charts
 
             st.subheader("📊 Data Insights")
