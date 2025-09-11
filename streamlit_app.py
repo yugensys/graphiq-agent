@@ -552,18 +552,21 @@ def execute_sql_on_df(sql: str, df: pd.DataFrame, max_retries: int = 2) -> pd.Da
     df_clean.columns = [str(col).lower() for col in df_clean.columns]
     
     # Extract the table name if it exists - handle various quoting styles and special characters
-    table_match = re.search(r'(?i)from\s+([`"\[\]]?[^\s`"\[\];]+(?:\s+[^\s`"\[\];]+)*[`"\[\]]?)(?:\s|;|$)', sql)
+    table_match = re.search(
+        r'(?i)(from\s+)([`"\[\]]?[^\s`"\[\];]+)(?=\s|;|$)', 
+        sql
+    )
     if table_match:
-        original_table = table_match.group(1).strip('`"[]')
+        prefix = table_match.group(1)  # "from "
+        original_table = table_match.group(2).strip('`"[]')
         print(f"[DEBUG] Found table reference: '{original_table}'")
         logger.info(f"Found table reference: '{original_table}'")
         
-        # Replace the entire matched table reference with 'df_clean'
-        sql = sql.replace(table_match.group(1), 'df_clean', 1)
-        print(f"[DEBUG] Replaced table name. New query:\n{sql}")
+        # Replace ONLY the table reference, not the rest of the query
+        sql = sql[:table_match.start(2)] + "df_clean" + sql[table_match.end(2):]
+        print(f"[DEBUG] Replaced table name safely. New query:\n{sql}")
     else:
         print("[DEBUG] No table reference found in SQL query")
-        # If no FROM clause found, try to add one
         if "FROM" not in sql.upper() and "WHERE" in sql.upper():
             where_pos = sql.upper().find("WHERE")
             sql = sql[:where_pos] + "FROM df_clean " + sql[where_pos:]
@@ -571,7 +574,6 @@ def execute_sql_on_df(sql: str, df: pd.DataFrame, max_retries: int = 2) -> pd.Da
         elif "FROM" not in sql.upper():
             sql = sql + " FROM df_clean"
             print(f"[DEBUG] Added missing FROM clause at the end. New query:\n{sql}")
-    
     # Convert all column references to lowercase
     print("[DEBUG] Available columns in DataFrame:")
     for i, col in enumerate(df.columns, 1):
@@ -814,6 +816,7 @@ Return ONLY the insight text, no markdown or formatting."""
                 """Generate charts using DeepSeek based on the provided prompt and data."""
                 system_msg = (f'''You are a data visualization expert that creates beautiful, insightful charts using Plotly.
 
+
 IMPORTANT: Use this compact schema for charts. Example:
 [
   {{
@@ -838,6 +841,10 @@ RULES:
 5. Use simple color codes (hex or named colors)
 6. Max 2 charts per response
 7. Return ONLY the JSON, no markdown code blocks or additional text
+8. VERY IMPORTANT: Use ONLY the values and categories present in the provided sample_data. 
+   - Do NOT invent or assume missing categories.
+   - If a category is absent in sample_data, simply omit it from the chart.
+   - If sample_data has only one category/value, generate a chart with just that category/value.
 ''')
 
 
