@@ -1,0 +1,24 @@
+[server]
+# Disable CORS to allow cross-origin requests (e.g., from your React app)
+enableCORS = false
+
+# Listen on all addresses so Render can route traffic correctly
+address = "0.0.0.0"
+
+# Use the PORT environment variable provided by Render
+port = $PORT
+
+# Optional: suppress Streamlit usage stats
+gatherUsageStats = false
+
+[client]
+# Optional: enable browser safety checks (can be true or false)
+enableXsrfProtection = true
+
+[theme]
+# Optional: set default theme
+base = "light"
+primaryColor = "#4CAF50"
+backgroundColor = "#FFFFFF"
+secondaryBackgroundColor = "#F0F2F6"
+textColor = "#000000"
