@@ -1,6 +1,5 @@
 # Virtual Environment
 venv/
-ENV/
 faiss_index/
 backup_main.py
 
@@ -41,9 +40,6 @@ coverage.xml
 
 # Jupyter Notebook
 .ipynb_checkpoints
-
-# Environment variables
-.env
 
 # IDE specific files
 .idea/
