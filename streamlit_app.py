@@ -19,7 +19,8 @@ import numpy as np
 # DeepSeek API configuration
 DEEPSEEK_API_URL = "https://api.deepseek.com/v1/chat/completions"
 DEEPSEEK_AVAILABLE = True  # We'll handle the actual availability in the function
-
+st.session_state.setdefault("uploaded_file", None)
+st.session_state.setdefault("reset_local_dataset_select", False)
 # Load environment variables from .env file
 load_dotenv()
 
@@ -157,7 +158,7 @@ def load_sentence_transformer():
 # ---------------------------
 # App Title
 # ---------------------------
-st.title("Agent Grapher: AI Chart Generator V19")
+st.title("Agent Graphiq: AI Chart Generator")
 
 # Vector store (cached)
 vector_store = get_vector_store()
@@ -355,18 +356,18 @@ local_files = list_local_datasets(folder="Dataset", max_files=5)
 dataset_choice = None
  
 if local_files:
-    options = ["(none)"] + local_files
+    options = ["(Select)"] + local_files
  
     # If an upload happened earlier, a reset flag will be present. Consume it here.
     reset = st.session_state.pop("reset_local_dataset_select", False)
  
     # Determine default index for the selectbox:
-    # - if reset flag present -> show "(none)" (index 0)
+    # - if reset flag present -> show "(Select)" (index 0)
     # - otherwise, keep previous selection if valid, else default to 0
     if reset:
         default_index = 0
     else:
-        prev = st.session_state.get("local_dataset_select", "(none)")
+        prev = st.session_state.get("local_dataset_select", "(Select)")
         default_index = options.index(prev) if prev in options else 0
  
     dataset_choice = st.sidebar.selectbox(
@@ -378,7 +379,7 @@ if local_files:
     )
  
 # If the user picked a local file, create a LocalUploadedFile and process it
-if dataset_choice and dataset_choice != "(none)":
+if dataset_choice and dataset_choice != "(Select)":
     local_path = Path("Dataset") / dataset_choice
     if local_path.exists():
         # wrap it so existing create_new_collection works unchanged
@@ -386,6 +387,10 @@ if dataset_choice and dataset_choice != "(none)":
         st.sidebar.info(f"Loading local dataset: {dataset_choice}")
         file_hash = ensure_collection_for_file(pseudo_uploaded, vector_store)
         if file_hash:
+            # 🚨 Cancel any uploaded file when a dataset is selected
+            st.session_state.last_uploaded_file = None
+            st.session_state.df = st.session_state.df  # keep current DF
+            st.session_state.uploaded_file = None
             st.session_state.current_file_hash = file_hash
             st.success(f"Loaded dataset: {dataset_choice}")
             # optionally scroll to main area to show data preview (no structural change)
@@ -416,11 +421,11 @@ if st.session_state.df is not None and not st.session_state.df.empty:
     st.sidebar.info(f"📊 Using embeddings for: {st.session_state.last_uploaded_file or 'current file'}")
     st.subheader("Data Preview (First 5 Rows)")
     st.dataframe(df.head(5))
-    with st.sidebar.expander("Dataset MDL (auto-generated)"):
-        if st.session_state.mdl_text:
-            st.text_area("MDL (brief)", st.session_state.mdl_text, height=240)
-        else:
-            st.write("MDL not available for this dataset.")
+    # with st.sidebar.expander("Dataset MDL (auto-generated)"):
+    #     if st.session_state.mdl_text:
+    #         st.text_area("MDL (brief)", st.session_state.mdl_text, height=240)
+    #     else:
+    #         st.write("MDL not available for this dataset.")
 else:
     st.info("Please upload a data file to get started.")
     st.stop()
@@ -935,39 +940,34 @@ Return ONLY the insight text, no markdown or formatting."""
             def generate_charts(prompt_text, sample_data, generated_sql=None):
                 """Generate charts using DeepSeek based on the provided prompt and data."""
                 system_msg = (f'''You are a data visualization expert that creates beautiful, insightful charts using Plotly.
-
-
-IMPORTANT: Use this compact schema for charts. Example:
-[
-  {{
-    "type": "bar",  // bar, line, pie, scatter, box, etc.
-    "title": "Chart Title",
-    "x": ["A", "B", "C"],  // X values or categories
-    "y": [10, 20, 30],      // Y values
-    "y2": [5, 15, 25],      // Optional: Secondary Y values
-    "marker_color": "#4285F4",     // Optional: Color for main trace (use marker_color for single color)
-    "marker_colors": ["#4285F4", "#EA4335"],  // Optional: Colors for multiple traces or pie segments
-    "x_label": "X Axis",    // Optional: X-axis label
-    "y_label": "Y Axis",    // Optional: Y-axis label
-    "orientation": "v"      // Optional: "h" for horizontal bars
-  }}
-]
-
-RULES:
-1. ALWAYS return a valid JSON array of chart objects
-2. For bar/line/scatter: 'x' and 'y' are required
-3. For pie: 'labels' and 'values' are required
-4. Keep it minimal - no unnecessary fields
-5. Use simple color codes (hex or named colors)
-6. Max 2 charts per response
-7. Return ONLY the JSON, no markdown code blocks or additional text
-8. VERY IMPORTANT: Use ONLY the values and categories present in the provided sample_data. 
-   - Do NOT invent or assume missing categories.
-   - If a category is absent in sample_data, simply omit it from the chart.
-   - If sample_data has only one category/value, generate a chart with just that category/value.
-''')
-
-
+                IMPORTANT: Use this compact schema for charts. Example:
+                [
+                {{
+                    "type": "bar",  // bar, line, pie, scatter, box, etc.
+                    "title": "Chart Title",
+                    "x": ["A", "B", "C"],  // X values or categories
+                    "y": [10, 20, 30],      // Y values
+                    "y2": [5, 15, 25],      // Optional: Secondary Y values
+                    "marker_color": "#4285F4",     // Optional: Color for main trace (use marker_color for single color)
+                    "marker_colors": ["#4285F4", "#EA4335"],  // Optional: Colors for multiple traces or pie segments
+                    "x_label": "X Axis",    // Optional: X-axis label
+                    "y_label": "Y Axis",    // Optional: Y-axis label
+                    "orientation": "v"      // Optional: "h" for horizontal bars
+                }}
+                ]
+                RULES:
+                1. ALWAYS return a valid JSON array of chart objects
+                2. For bar/line/scatter: 'x' and 'y' are required
+                3. For pie: 'labels' and 'values' are required
+                4. Keep it minimal - no unnecessary fields
+                5. Use simple color codes (hex or named colors)
+                6. Max 2 charts per response
+                7. Return ONLY the JSON, no markdown code blocks or additional text
+                8. VERY IMPORTANT: Use ONLY the values and categories present in the provided sample_data. 
+                - Do NOT invent or assume missing categories.
+                - If a category is absent in sample_data, simply omit it from the chart.
+                - If sample_data has only one category/value, generate a chart with just that category/value.
+                ''')
                 user_msg = (
                     f"User query: {prompt_text}\n"
                     f"Available columns: {list(st.session_state.df.columns)}\n"
