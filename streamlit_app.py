@@ -898,12 +898,27 @@ RULES:
                 import plotly.express as px
                 import plotly.graph_objects as go
                 
+
                 chart_configs = json.loads(clean_json)
+                # Add validation
+                if not isinstance(chart_configs, list) or not chart_configs:
+                    st.error("No valid chart configurations were generated. Please try a different query.")
+                    st.stop()
                 
                 for config in chart_configs:
+                    if not isinstance(config, dict):
+                        continue
                     chart_type = config.get('type', 'bar')
                     title = config.get('title', 'Chart')
-                    
+                    # Skip if required fields are missing
+                    if chart_type == 'pie':
+                        if not all(key in config for key in ['values', 'labels']) or not config['values'] or not config['labels']:
+                            st.warning(f"Skipping invalid pie chart config: missing required fields")
+                            continue
+                    else:
+                        if not all(key in config for key in ['x', 'y']) or not config['x'] or not config['y']:
+                            st.warning(f"Skipping invalid {chart_type} chart config: missing required fields")
+                            continue
                     if chart_type == 'pie':
                         fig = px.pie(
                             values=config.get('values', []),
