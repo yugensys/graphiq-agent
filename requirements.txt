@@ -14,4 +14,3 @@ faiss-cpu>=1.7.0  # Use faiss-gpu if you have CUDA
 sqlalchemy>=2.0.0
 tqdm>=4.65.0
 torch>=2.8.0
-numpy>=1.24.0
