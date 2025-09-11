@@ -392,7 +392,7 @@ def generate_sql_query(
 
         if sql == "INVALID QUERY":
             logger.error("9999 Invalid query generated")
-            return sql  # propagate upwards
+            return sql  
 
         resulting_sql = clean_sql(sql, mdl)
         return resulting_sql
