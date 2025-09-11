@@ -315,7 +315,7 @@ def create_new_collection(uploaded, vs: VectorStore) -> Optional[str]:
 # ---------- Local dataset selector (loads files from ./Dataset) ----------
 from types import SimpleNamespace
  
-def list_local_datasets(folder: str = "Dataset", max_files: int = 5):
+def list_local_datasets(folder: str = "Dataset", max_files: int = 10):
     """
     Returns up to `max_files` dataset filenames in the given folder.
     Only CSV/XLSX/XLS are returned and sorted for stable order.
