@@ -3,6 +3,8 @@ venv/
 faiss_index/
 backup_main.py
 
+*.pkl
+*.faiss
 # Python cache
 __pycache__/
 *.py[cod]

@@ -89,7 +89,6 @@ def safe_eval_arithmetic(expr: Any) -> Any:
     except Exception:
         return expr
 
-
 def process_chart_config(config: Any) -> Any:
     """Recursively process chart config to evaluate arithmetic expressions."""
     if isinstance(config, dict):
@@ -312,14 +311,99 @@ def create_new_collection(uploaded, vs: VectorStore) -> Optional[str]:
         except Exception:
             pass
 
-
+# ---------- Local dataset selector (loads files from ./Dataset) ----------
+from types import SimpleNamespace
+ 
+def list_local_datasets(folder: str = "Dataset", max_files: int = 5):
+    """
+    Returns up to `max_files` dataset filenames in the given folder.
+    Only CSV/XLSX/XLS are returned and sorted for stable order.
+    """
+    p = Path(folder)
+    if not p.exists() or not p.is_dir():
+        return []
+    candidates = sorted([f for f in p.iterdir() if f.suffix.lower() in (".csv", ".xlsx", ".xls")])
+    return [str(f.name) for f in candidates[:max_files]]
+ 
+class LocalUploadedFile:
+    """
+    Minimal wrapper to mimic Streamlit's UploadedFile interface enough for
+    create_new_collection/get_file_hash usage (getbuffer and getvalue and name).
+    """
+    def __init__(self, path: Union[str, Path]):
+        self.path = Path(path)
+        self.name = self.path.name
+        # read bytes lazily
+        self._bytes = None
+ 
+    def _ensure(self):
+        if self._bytes is None:
+            with open(self.path, "rb") as f:
+                self._bytes = f.read()
+ 
+    def getbuffer(self):
+        # create a buffer-like object that has a .tobytes() if needed by code
+        self._ensure()
+        return memoryview(self._bytes)
+ 
+    def getvalue(self):
+        self._ensure()
+        return self._bytes
+ 
+# Show the selector only when the Dataset folder exists
+local_files = list_local_datasets(folder="Dataset", max_files=5)
+dataset_choice = None
+ 
+if local_files:
+    options = ["(none)"] + local_files
+ 
+    # If an upload happened earlier, a reset flag will be present. Consume it here.
+    reset = st.session_state.pop("reset_local_dataset_select", False)
+ 
+    # Determine default index for the selectbox:
+    # - if reset flag present -> show "(none)" (index 0)
+    # - otherwise, keep previous selection if valid, else default to 0
+    if reset:
+        default_index = 0
+    else:
+        prev = st.session_state.get("local_dataset_select", "(none)")
+        default_index = options.index(prev) if prev in options else 0
+ 
+    dataset_choice = st.sidebar.selectbox(
+        "Or choose a sample dataset from project (Dataset/)",
+        options,
+        index=default_index,
+        key="local_dataset_select",
+        help="Pick one of the datasets from the project's Dataset/ folder to load it directly."
+    )
+ 
+# If the user picked a local file, create a LocalUploadedFile and process it
+if dataset_choice and dataset_choice != "(none)":
+    local_path = Path("Dataset") / dataset_choice
+    if local_path.exists():
+        # wrap it so existing create_new_collection works unchanged
+        pseudo_uploaded = LocalUploadedFile(local_path)
+        st.sidebar.info(f"Loading local dataset: {dataset_choice}")
+        file_hash = ensure_collection_for_file(pseudo_uploaded, vector_store)
+        if file_hash:
+            st.session_state.current_file_hash = file_hash
+            st.success(f"Loaded dataset: {dataset_choice}")
+            # optionally scroll to main area to show data preview (no structural change)
+            # Note: we don't call st.experimental_rerun() so that the flow continues naturally.
+    else:
+        st.sidebar.error(f"Dataset file missing: {local_path}")
+       
+# -------------------------------------------------------------------------------------------------------
+ 
 # ---------------------------
 # Load / show data
 # ---------------------------
 if uploaded_file is not None:
     file_hash = ensure_collection_for_file(uploaded_file, vector_store)
     if file_hash:
+        st.session_state["reset_local_dataset_select"] = True
         st.session_state.current_file_hash = file_hash
+ 
 
 st.session_state.setdefault("df", None)
 st.session_state.setdefault("current_file_hash", None)
@@ -629,7 +713,16 @@ def execute_sql_on_df(sql: str, df: pd.DataFrame, max_retries: int = 2) -> pd.Da
     sql = re.sub(r'`([^`]+)`', r'"\1"', sql)
     if sql_before != sql:
         print(f"[DEBUG] Backtick replacement modified the query")
-    
+
+    # --- START FALLBACK: ensure top-level FROM maps to df_clean ---
+    # If replacement didn't map the table to df_clean, replace the first FROM <something>
+    # with FROM df_clean. This avoids issues where the LLM used a filename/table name.
+    if 'df_clean' not in sql.lower():
+        # Replace only the first top-level FROM <table> occurrence (case-insensitive)
+        sql = re.sub(r'(?i)\bFROM\s+([`"\[]?[^\s;]+[`"\]]?)', 'FROM df_clean', sql, count=1)
+        print("[DEBUG] Applied fallback replacement to map FROM -> df_clean")
+    # --- END FALLBACK ---
+
     print("\n" + "="*80)
     print(f"[DEBUG] Final SQL to be executed:\n{sql}")
     print("="*80 + "\n")
@@ -655,7 +748,7 @@ def execute_sql_on_df(sql: str, df: pd.DataFrame, max_retries: int = 2) -> pd.Da
             logger.warning("Retrying with original column names...")
             return sqldf(sql, {'df_clean': df})
         except Exception as e2:
-            logger.error(f"SQL execution failed: {str(e2)}")
+            # logger.error(f"SQL execution failed: {str(e2)}")
             # Provide more detailed error information
             sample_columns = ", ".join([f'"{col}"' for col in df_clean.columns])
             raise ValueError(
