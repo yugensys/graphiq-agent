@@ -925,95 +925,130 @@ RULES:
                 import plotly.express as px
                 import plotly.graph_objects as go
                 
-
-                chart_configs = json.loads(clean_json)
+                try:
+                    chart_configs = json.loads(clean_json)
+                    logger.info(f"Successfully parsed chart configs: {chart_configs}")
+                except json.JSONDecodeError as je:
+                    logger.error(f"Failed to parse JSON: {clean_json}")
+                    raise ValueError(f"Invalid JSON format in chart configuration: {str(je)}")
+                
                 # Add validation
-                if not isinstance(chart_configs, list) or not chart_configs:
-                    st.error("No valid chart configurations were generated. Please try a different query.")
+                if not isinstance(chart_configs, list):
+                    logger.error(f"Expected list of chart configs, got: {type(chart_configs)}")
+                    st.error("Invalid chart configuration format. Expected a list of charts.")
+                    st.stop()
+                    
+                if not chart_configs:
+                    logger.warning("Empty chart configurations list received")
+                    st.warning("No chart configurations were generated. Please try a different query.")
                     st.stop()
                 
-                for config in chart_configs:
-                    if not isinstance(config, dict):
+                for i, config in enumerate(chart_configs, 1):
+                    try:
+                        logger.info(f"Processing chart {i}/{len(chart_configs)}")
+                        
+                        if not isinstance(config, dict):
+                            logger.warning(f"Skipping invalid chart config (not a dictionary): {config}")
+                            st.warning(f"Skipping invalid chart configuration (not a dictionary)")
+                            continue
+                            
+                        chart_type = config.get('type', 'bar')
+                        title = config.get('title', 'Chart')
+                        
+                        # Debug: Print the config being processed
+                        logger.info(f"Processing chart type: {chart_type} with config: {config}")
+                        
+                        # Validate required fields based on chart type
+                        if chart_type == 'pie':
+                            required = ['values', 'labels']
+                            if not all(key in config and config[key] for key in required):
+                                logger.warning(f"Skipping invalid pie chart config - missing required fields: {config}")
+                                st.warning(f"Skipping invalid pie chart: missing required fields (needs 'values' and 'labels')")
+                                continue
+                        else:
+                            required = ['x', 'y']
+                            if not all(key in config and config[key] for key in required):
+                                logger.warning(f"Skipping invalid {chart_type} chart config - missing required fields: {config}")
+                                st.warning(f"Skipping invalid {chart_type} chart: missing required fields (needs 'x' and 'y')")
+                                continue
+                        
+                        logger.info(f"Chart config validation passed: {config}")
+                        
+                        if chart_type == 'pie':
+                            fig = px.pie(
+                                values=config.get('values', []),
+                                names=config.get('labels', []),
+                                title=title,
+                                color_discrete_sequence=[config.get('color', '#4285F4')] if 'color' in config else None
+                            )
+                        else:
+                            # Create figure with primary y-axis
+                            fig = go.Figure()
+                            
+                            # Add primary trace
+                            if chart_type == 'bar':
+                                fig.add_trace(go.Bar(
+                                    x=config.get('x', []),
+                                    y=config.get('y', []),
+                                    name=config.get('y_label', 'Y'),
+                                    marker_color=config.get('color', '#4285F4'),
+                                    orientation=config.get('orientation', 'v')
+                                ))
+                            elif chart_type == 'line':
+                                fig.add_trace(go.Scatter(
+                                    x=config.get('x', []),
+                                    y=config.get('y', []),
+                                    name=config.get('y_label', 'Y'),
+                                    line=dict(color=config.get('color', '#4285F4')),
+                                    mode='lines+markers'
+                                ))
+                            else:  # Default to scatter
+                                fig.add_trace(go.Scatter(
+                                    x=config.get('x', []),
+                                    y=config.get('y', []),
+                                    name=config.get('y_label', 'Y'),
+                                    mode='markers',
+                                    marker=dict(color=config.get('color', '#4285F4'))
+                                ))
+                            
+                            # Add secondary trace if exists
+                            if 'y2' in config:
+                                fig.add_trace(go.Scatter(
+                                    x=config.get('x', []),
+                                    y=config.get('y2'),
+                                    name=config.get('y2_label', 'Y2'),
+                                    line=dict(color=config.get('color2', '#EA4335')),
+                                    yaxis='y2'
+                                ))
+                            
+                            # Update layout
+                            fig.update_layout(
+                                title=title,
+                                xaxis_title=config.get('x_label', 'X'),
+                                yaxis_title=config.get('y_label', 'Y'),
+                                yaxis2={
+                                    'title': config.get('y2_label', 'Y2'),
+                                    'overlaying': 'y',
+                                    'side': 'right',
+                                    'showgrid': False
+                                } if 'y2' in config else None,
+                                showlegend=True,
+                                hovermode='closest',
+                                margin=dict(l=50, r=50, t=50, b=50)
+                            )
+                        
+                        # Display the figure
+                        st.plotly_chart(fig, use_container_width=True)
+                        
+                    except Exception as chart_error:
+                        logger.exception(f"Error processing chart {i}: {str(chart_error)}")
+                        st.warning(f"Skipping chart {i} due to an error: {str(chart_error)}")
                         continue
-                    chart_type = config.get('type', 'bar')
-                    title = config.get('title', 'Chart')
-                    # Skip if required fields are missing
-                    if chart_type == 'pie':
-                        if not all(key in config for key in ['values', 'labels']) or not config['values'] or not config['labels']:
-                            st.warning(f"Skipping invalid pie chart config: missing required fields")
-                            continue
-                    else:
-                        if not all(key in config for key in ['x', 'y']) or not config['x'] or not config['y']:
-                            st.warning(f"Skipping invalid {chart_type} chart config: missing required fields")
-                            continue
-                    if chart_type == 'pie':
-                        fig = px.pie(
-                            values=config.get('values', []),
-                            names=config.get('labels', []),
-                            title=title,
-                            color_discrete_sequence=[config.get('color', '#4285F4')] if 'color' in config else None
-                        )
-                    else:
-                        # Create figure with primary y-axis
-                        fig = go.Figure()
                         
-                        # Add primary trace
-                        if chart_type == 'bar':
-                            fig.add_trace(go.Bar(
-                                x=config.get('x', []),
-                                y=config.get('y', []),
-                                name=config.get('y_label', 'Y'),
-                                marker_color=config.get('color', '#4285F4'),
-                                orientation=config.get('orientation', 'v')
-                            ))
-                        elif chart_type == 'line':
-                            fig.add_trace(go.Scatter(
-                                x=config.get('x', []),
-                                y=config.get('y', []),
-                                name=config.get('y_label', 'Y'),
-                                line=dict(color=config.get('color', '#4285F4')),
-                                mode='lines+markers'
-                            ))
-                        else:  # Default to scatter
-                            fig.add_trace(go.Scatter(
-                                x=config.get('x', []),
-                                y=config.get('y', []),
-                                name=config.get('y_label', 'Y'),
-                                mode='markers',
-                                marker=dict(color=config.get('color', '#4285F4'))
-                            ))
-                        
-                        # Add secondary trace if exists
-                        if 'y2' in config:
-                            fig.add_trace(go.Scatter(
-                                x=config.get('x', []),
-                                y=config.get('y2'),
-                                name=config.get('y2_label', 'Y2'),
-                                line=dict(color=config.get('color2', '#EA4335')),
-                                yaxis='y2'
-                            ))
-                        
-                        # Update layout
-                        fig.update_layout(
-                            title=title,
-                            xaxis_title=config.get('x_label', 'X'),
-                            yaxis_title=config.get('y_label', 'Y'),
-                            yaxis2={
-                                'title': config.get('y2_label', 'Y2'),
-                                'overlaying': 'y',
-                                'side': 'right',
-                                'showgrid': False
-                            } if 'y2' in config else None,
-                            showlegend=True,
-                            hovermode='closest',
-                            margin=dict(l=50, r=50, t=50, b=50)
-                        )
-                    
-                    # Display the figure
-                    st.plotly_chart(fig, use_container_width=True)
-                    
             except json.JSONDecodeError as e:
                 st.error(f"Failed to parse chart configuration: {str(e)}")
+                logger.error(f"JSON decode error: {str(e)}\nJSON content: {clean_json}")
+                
             except Exception as e:
                 import traceback
                 error_details = {
