@@ -23,6 +23,16 @@ DEEPSEEK_AVAILABLE = True  # We'll handle the actual availability in the functio
 # Load environment variables from .env file
 load_dotenv()
 
+# Configure logging first
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.StreamHandler(sys.stdout),
+    ]
+)
+logger = logging.getLogger(__name__)
+
 # Debug: Check if DEEPSEEK_API_KEY is loaded
 if not os.getenv("DEEPSEEK_API_KEY"):
     logger.warning("DEEPSEEK_API_KEY not found in environment variables")
@@ -51,12 +61,6 @@ from mdl_utils import generate_mdl, mdl_to_text, generate_sql_query
 # ---------------------------
 # Logging & Environment
 # ---------------------------
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s - %(levelname)s - %(message)s",
-    handlers=[logging.StreamHandler(sys.stdout)],
-)
-logger = logging.getLogger(__name__)
 
 # Load environment variables (supports .env)
 load_dotenv()
@@ -756,6 +760,56 @@ if st.button("Generate Charts") and user_prompt:
                 
                 return LLMProvider()
 
+            def generate_insights(prompt_text, sample_data, generated_sql=None):
+                """Generate concise 2-3 sentence data insights based on the SQL output."""
+                
+                system_msg = """You are a data analyst that provides clear, concise insights from data.
+
+
+
+RULES:
+
+1. Write ONLY 2-3 sentences maximum
+
+2. Focus on the most important finding
+
+3. Include specific numbers and percentages
+
+4. Use plain, non-technical language
+
+5. Structure as a single paragraph, no bullet points
+
+6. Example format: "[Key finding] increased/decreased by X% to [value], driven by [main factor]. [Additional context if needed]."
+
+Return ONLY the insight text, no markdown or formatting."""
+
+                user_msg = (
+                    f"User query: {prompt_text}\n"
+                    f"Data columns: {list(sample_data[0].keys()) if sample_data else 'No data'}\n"
+                    f"Sample data: {json.dumps(sample_data[:3], default=str) if sample_data else 'No data'}\n"
+                    f"SQL context: {generated_sql if generated_sql else 'No SQL'}\n\n"
+                    "Provide a 2-3 sentence insight about the most important trend or finding in this data."
+                )
+
+                try:
+                    llm = get_llm_provider()
+                    prompt = f"{system_msg}\n\n{user_msg}"
+                    logger.info("Generating concise insights...")
+                    insight = llm.generate(prompt).strip()
+
+                    # Clean up the response
+                    insight = insight.strip('"\'')  # Remove any surrounding quotes
+                    if insight.startswith('Insight: '):
+                        insight = insight[9:]  # Remove 'Insight: ' prefix if present
+                        
+                    return insight
+
+                except Exception as e:
+                    logger.exception("Error generating insights")
+                    return None
+
+
+
             def generate_charts(prompt_text, sample_data, generated_sql=None):
                 """Generate charts using DeepSeek based on the provided prompt and data."""
                 system_msg = (f'''You are a data visualization expert that creates beautiful, insightful charts using Plotly.
@@ -913,6 +967,36 @@ RULES:
                 st.error(f"Failed to parse chart configuration: {str(e)}")
             except Exception as e:
                 st.error(f"Error generating chart: {str(e)}")
+              # Generate insights after charts
+
+            st.subheader("📊 Data Insights")
+
+            with st.spinner("Generating insights..."):
+
+                insights = generate_insights(user_prompt, sample_data, generated_sql)
+
+                
+
+                if insights:
+
+                    # Display insights as a clean paragraph
+
+                    st.markdown("### Key Findings:")
+
+                    st.markdown(insights)
+
+                    
+
+                    # Add insights to expandable section for debugging
+
+                    # with st.expander("Debug: Raw Insights Response"):
+
+                    #     st.text(insights)
+
+                else:
+
+                    st.warning("Could not generate insights. Please try again.")
+        
 
         except RuntimeError as e:
             st.error(str(e))
