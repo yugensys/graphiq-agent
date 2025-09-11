@@ -822,8 +822,8 @@ IMPORTANT: Use this compact schema for charts. Example:
     "x": ["A", "B", "C"],  // X values or categories
     "y": [10, 20, 30],      // Y values
     "y2": [5, 15, 25],      // Optional: Secondary Y values
-    "color": "#4285F4",     // Optional: Color for main trace
-    "color2": "#EA4335",    // Optional: Color for secondary trace
+    "marker_color": "#4285F4",     // Optional: Color for main trace (use marker_color for single color)
+    "marker_colors": ["#4285F4", "#EA4335"],  // Optional: Colors for multiple traces or pie segments
     "x_label": "X Axis",    // Optional: X-axis label
     "y_label": "Y Axis",    // Optional: Y-axis label
     "orientation": "v"      // Optional: "h" for horizontal bars
