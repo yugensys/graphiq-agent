@@ -1023,5 +1023,5 @@ RULES:
         except RuntimeError as e:
             st.error(str(e))
         except Exception as e:
-            logger.exception("DEBUG Error generating visualization: %s", e)
-            st.error(f"Error generating visualization: {e}")
+            logger.exception("1234 Error generating visualization: %s", e)
+            st.error(f"6789 Error generating visualization: {e}")
