@@ -1,326 +1,419 @@
+# db_utils.py
 import os
 import logging
-import json
-import numpy as np
+import pickle
 from typing import List, Dict, Any, Optional
 from pathlib import Path
-import faiss
-from sentence_transformers import SentenceTransformer
-from dataclasses import dataclass, asdict
-import pickle
-import logging
-from typing import Any, Dict, List, Optional
-import os
-import sys
-import tempfile
-from pathlib import Path
-import streamlit as st
-import pandas as pd
-from dotenv import load_dotenv
-import numpy as np
 
-# Configure logging
+import numpy as np
+import faiss
+
+# Configure logging (single-time)
 logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(levelname)s - %(message)s'
+    level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s"
 )
 logger = logging.getLogger(__name__)
 
-# Add __module__ to ensure consistent pickling
+
 class Document:
-    """A document with content and optional metadata."""
-    __module__ = 'db_utils'  # Explicitly set module for pickling
-    
+    """
+    A document with content and optional metadata.
+    Metadata should be JSON-serializable friendly (embeddings as lists).
+    """
+
+    __module__ = "db_utils"  # helps with pickling across modules
+
     def __init__(self, page_content: str, metadata: Dict[str, Any] = None):
         self.page_content = page_content
         self.metadata = metadata or {}
-    
+
     def __getstate__(self) -> Dict[str, Any]:
-        return {
-            'page_content': self.page_content,
-            'metadata': self.metadata
-        }
-    
+        return {"page_content": self.page_content, "metadata": self.metadata}
+
     def __setstate__(self, state: Dict[str, Any]) -> None:
-        self.page_content = state['page_content']
-        self.metadata = state.get('metadata', {})
-    
+        self.page_content = state["page_content"]
+        self.metadata = state.get("metadata", {})
+
     def __repr__(self) -> str:
         return f"Document(page_content='{self.page_content[:50]}...', metadata={self.metadata})"
-    
+
     def to_dict(self) -> Dict[str, Any]:
-        """Convert document to dictionary."""
-        return {
-            'page_content': self.page_content,
-            'metadata': self.metadata
-        }
-    
+        """Convert document to dictionary for stable saving."""
+        return {"page_content": self.page_content, "metadata": self.metadata}
+
     @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> 'Document':
-        """Create document from dictionary."""
-        return cls(
-            page_content=data['page_content'],
-            metadata=data.get('metadata', {})
-        )
+    def from_dict(cls, data: Dict[str, Any]) -> "Document":
+        return cls(page_content=data.get("page_content", ""), metadata=data.get("metadata", {}) or {})
+
 
 class VectorStore:
-    """FAISS-based vector store for document embeddings."""
-    
+    """
+    FAISS-backed vector store that uses cosine similarity semantics via
+    IndexFlatIP + normalized vectors.
+
+    - `dimension` should match the embedding dimension.
+    - `index_path` is the folder where index.faiss and documents.pkl will be stored.
+    """
+
     def __init__(self, dimension: int = 384, index_path: str = "faiss_index"):
-        """Initialize the FAISS index and document store."""
         self.dimension = dimension
         self.index_path = Path(index_path)
-        self.documents = []
-        self.index = None
+        self.documents: List[Document] = []
+        self.index: Optional[faiss.Index] = None
         self._initialize_index()
-    
+
+    # ---------------------
+    # GPU helper
+    # ---------------------
+    def _maybe_move_index_to_gpu(self, index: faiss.Index) -> faiss.Index:
+        """
+        Move a CPU index to GPU if faiss-gpu is available and GPUs exist.
+        Returns the index (possibly GPU version). Safe no-op if GPU not usable.
+        """
+        try:
+            ngpu = faiss.get_num_gpus()
+            if ngpu > 0:
+                logger.info(f"Moving FAISS index to GPU (num_gpus={ngpu})")
+                res = faiss.StandardGpuResources()
+                gpu_index = faiss.index_cpu_to_gpu(res, 0, index)
+                return gpu_index
+        except Exception as e:
+            logger.debug("FAISS GPU move not available or failed: %s", e)
+        return index
+
+    # ---------------------
+    # Index init / save / load
+    # ---------------------
     def _initialize_index(self):
-        """Initialize or load the FAISS index."""
-        if self.index_path.exists():
-            self._load_index()
-        else:
-            # Using FlatL2 for exact search (can be changed to IVFFLAT or HNSW for approximate search)
-            self.index = faiss.IndexFlatL2(self.dimension)
-        
+        """
+        Initialize or load the FAISS index (prefers existing on-disk index).
+        """
+        try:
+            if self.index_path.exists() and (self.index_path / "index.faiss").exists():
+                loaded = self._load_index()
+                if loaded:
+                    return
+
+            # Create a new CPU index (we'll move to GPU if possible)
+            cpu_index = faiss.IndexFlatIP(self.dimension)
+            self.index = self._maybe_move_index_to_gpu(cpu_index)
+            self.documents = []
+            logger.info("Initialized new FAISS index (IndexFlatIP)")
+        except Exception as e:
+            logger.exception("Failed to initialize FAISS index: %s", e)
+            raise
+
     def _save_index(self):
-        """Save the FAISS index and documents to disk."""
+        """Save FAISS index and documents to disk in a stable pickle-friendly format."""
         self.index_path.mkdir(parents=True, exist_ok=True)
-        
-        # Save FAISS index
-        faiss.write_index(self.index, str(self.index_path / "index.faiss"))
-        
-        # Save documents as list of dicts for better compatibility
-        documents_data = [doc.to_dict() for doc in self.documents]
-        with open(self.index_path / "documents.pkl", "wb") as f:
-            pickle.dump(documents_data, f, protocol=pickle.HIGHEST_PROTOCOL)
-    
+
+        try:
+            # If index is on GPU, convert back to CPU for serialization
+            index_to_write = self.index
+            try:
+                if faiss.get_num_gpus() > 0 and index_to_write is not None:
+                    index_to_write = faiss.index_gpu_to_cpu(index_to_write)
+            except Exception:
+                # safe fallback: attempt to write current index (may fail if GPU-only)
+                index_to_write = self.index
+
+            faiss.write_index(index_to_write, str(self.index_path / "index.faiss"))
+        except Exception as e:
+            logger.exception("Failed to write FAISS index: %s", e)
+            raise
+
+        # Save documents as list of dicts and ensure embeddings are plain lists
+        documents_data = []
+        for doc in self.documents:
+            meta = dict(doc.metadata or {})
+            emb = meta.get("embedding")
+            if isinstance(emb, np.ndarray):
+                meta["embedding"] = emb.astype(np.float32).tolist()
+            documents_data.append({"page_content": doc.page_content, "metadata": meta})
+
+        try:
+            with open(self.index_path / "documents.pkl", "wb") as f:
+                pickle.dump(documents_data, f, protocol=pickle.HIGHEST_PROTOCOL)
+        except Exception as e:
+            logger.exception("Failed to write documents.pkl: %s", e)
+            raise
+
+    def _load_index(self) -> bool:
+        """
+        Load FAISS index and saved documents from disk. Returns True on success.
+        """
+        try:
+            idx_file = self.index_path / "index.faiss"
+            docs_file = self.index_path / "documents.pkl"
+
+            if idx_file.exists():
+                cpu_index = faiss.read_index(str(idx_file))
+                self.index = self._maybe_move_index_to_gpu(cpu_index)
+
+                # Load documents if present
+                if docs_file.exists():
+                    try:
+                        with open(docs_file, "rb") as f:
+                            documents_data = pickle.load(f)
+
+                        self.documents = []
+                        for item in documents_data:
+                            if isinstance(item, Document):
+                                self.documents.append(item)
+                            elif isinstance(item, dict):
+                                page_content = item.get("page_content", "")
+                                metadata = item.get("metadata", {}) or {}
+                                emb = metadata.get("embedding")
+                                if isinstance(emb, list):
+                                    metadata["embedding"] = np.array(emb, dtype=np.float32)
+                                self.documents.append(Document(page_content=page_content, metadata=metadata))
+
+                        logger.info(f"Loaded FAISS index and {len(self.documents)} documents from disk")
+                    except Exception as e:
+                        logger.exception("Failed to load documents.pkl: %s", e)
+                        self.documents = []
+                else:
+                    self.documents = []
+
+                return True
+            else:
+                # No on-disk index found, initialize new
+                self.index = faiss.IndexFlatIP(self.dimension)
+                self.index = self._maybe_move_index_to_gpu(self.index)
+                self.documents = []
+                logger.info("No FAISS index on disk; initialized new index")
+                return False
+        except Exception as e:
+            logger.exception("Error loading index: %s", e)
+            # fallback: new index
+            self.index = faiss.IndexFlatIP(self.dimension)
+            self.index = self._maybe_move_index_to_gpu(self.index)
+            self.documents = []
+            return False
+
+    # ---------------------
+    # Adding documents
+    # ---------------------
     def add_documents(self, documents: List[Document], model=None):
-        """Add documents to the vector store.
-        
-        Args:
-            documents: List of Document objects to add
-            model: Optional model for encoding documents if they don't have embeddings
+        """
+        Add Document objects to the FAISS index.
+
+        If a Document has metadata['embedding'], it's used (converted to np.array if needed).
+        Otherwise, if `model` is supplied, it will be used to encode the document text.
+        Embeddings are normalized for cosine similarity and stored as float32.
         """
         if not documents:
             return
-            
+
         try:
-            # Ensure index exists
             if self.index is None:
-                self.index = faiss.IndexFlatL2(self.dimension)
-                logger.info("Initialized new FAISS index")
-            
-            # Convert documents to embeddings if needed
-            embeddings = []
-            valid_docs = []
-            
+                cpu_index = faiss.IndexFlatIP(self.dimension)
+                self.index = self._maybe_move_index_to_gpu(cpu_index)
+                logger.info("Initialized new FAISS index at add_documents time")
+
+            embeddings_list = []
+            docs_to_add: List[Document] = []
+
             for doc in documents:
+                emb_arr = None
                 try:
-                    if hasattr(doc, 'metadata') and 'embedding' in doc.metadata:
-                        # Get embedding from metadata if available
-                        emb = doc.metadata['embedding']
+                    meta = getattr(doc, "metadata", {}) or {}
+
+                    # Use provided embedding if present
+                    if "embedding" in meta and meta["embedding"] is not None:
+                        emb = meta["embedding"]
                         if isinstance(emb, list):
-                            emb = np.array(emb, dtype=np.float32)
-                        embeddings.append(emb)
-                        valid_docs.append(doc)
-                    elif model is not None:
-                        # Generate embedding using the model
-                        emb = model.encode([doc.page_content])[0]
-                        embeddings.append(emb)
-                        # Store the embedding in metadata for future use
-                        if not hasattr(doc, 'metadata') or doc.metadata is None:
-                            doc = Document(doc.page_content, {'embedding': emb.tolist()})
+                            emb_arr = np.array(emb, dtype=np.float32)
+                        elif isinstance(emb, np.ndarray):
+                            emb_arr = emb.astype(np.float32)
                         else:
-                            doc.metadata['embedding'] = emb.tolist()
-                        valid_docs.append(doc)
+                            emb_arr = None
+                    elif model is not None:
+                        # Model expected to have an encode(...) method
+                        encoded = model.encode([doc.page_content], show_progress_bar=False)
+                        # encoded might be: list-of-arrays or numpy array
+                        if isinstance(encoded, list):
+                            emb_arr = np.array(encoded[0], dtype=np.float32)
+                        else:
+                            emb_np = np.array(encoded, dtype=np.float32)
+                            emb_arr = emb_np[0] if emb_np.ndim == 2 else emb_np
+
+                        # Persist embedding into metadata as a list for saving
+                        if not isinstance(meta, dict):
+                            meta = {}
+                        meta["embedding"] = emb_arr.tolist()
+                        doc.metadata = meta
                     else:
-                        logger.warning("Document has no embedding and no model provided to generate one")
+                        logger.warning("Document has no embedding and no model provided: skipping")
+                        emb_arr = None
                 except Exception as e:
-                    logger.error(f"Error processing document: {e}")
-            
-            if not valid_docs:
-                raise ValueError("No valid documents to add")
-            
-            # Convert to numpy array if needed
-            if isinstance(embeddings, list):
-                embeddings = np.array(embeddings, dtype=np.float32)
-            
-            # Add to FAISS index
-            self.index.add(embeddings)
-            
-            # Store documents
-            self.documents.extend(valid_docs)
-            
-            # Save the updated index
+                    logger.exception("Error extracting/creating embedding for a document: %s", e)
+                    emb_arr = None
+
+                if emb_arr is None:
+                    continue
+
+                # Normalize in-place for inner product = cosine semantics
+                faiss.normalize_L2(emb_arr.reshape(1, -1))
+                embeddings_list.append(emb_arr.astype(np.float32))
+
+                # Ensure metadata embedding stored as a plain list for persistence
+                if isinstance(doc.metadata.get("embedding"), np.ndarray):
+                    doc.metadata["embedding"] = doc.metadata["embedding"].astype(np.float32).tolist()
+
+                docs_to_add.append(doc)
+
+            if not docs_to_add:
+                raise ValueError("No valid documents to add to index")
+
+            # Stack embeddings to 2D array and add to FAISS
+            embeddings_np = np.vstack(embeddings_list).astype(np.float32)
+            self.index.add(embeddings_np)
+
+            # Append to in-memory docs list and persist to disk
+            self.documents.extend(docs_to_add)
             self._save_index()
-            
-            logger.info(f"Successfully added {len(valid_docs)} documents to the index")
-            
+            logger.info(f"Added {len(docs_to_add)} documents to FAISS index")
         except Exception as e:
-            logger.error(f"Error adding documents: {str(e)}", exc_info=True)
-            raise   
-        
-    def _load_index(self):
-        """Load the FAISS index and documents from disk if they exist."""
-        try:
-            if (self.index_path / "index.faiss").exists():
-                self.index = faiss.read_index(str(self.index_path / "index.faiss"))
-                
-                # Load documents if they exist
-                if (self.index_path / "documents.pkl").exists():
-                    try:
-                        with open(self.index_path / "documents.pkl", "rb") as f:
-                            documents_data = pickle.load(f)
-                            # Convert to Document objects if needed
-                            self.documents = []
-                            for doc in documents_data:
-                                if isinstance(doc, Document):
-                                    self.documents.append(doc)
-                                elif isinstance(doc, dict):
-                                    self.documents.append(Document(
-                                        page_content=doc.get('page_content', ''),
-                                        metadata=doc.get('metadata', {})
-                                    ))
-                        logger.info(f"Loaded {len(self.documents)} documents from index")
-                    except Exception as e:
-                        logger.error(f"Error loading documents: {e}")
-                        self.documents = []
-                return True
-            else:
-                # Initialize a new index if none exists
-                self.index = faiss.IndexFlatL2(self.dimension)
-                self.documents = []
-                logger.info("Initialized new FAISS index")
-                return False
-        except Exception as e:
-            logger.error(f"Error loading index: {e}")
-            # Fallback to new index on error
-            self.index = faiss.IndexFlatL2(self.dimension)
-            self.documents = []
-            return False
-    
+            logger.exception("Error in add_documents: %s", e)
+            raise
+
+    # ---------------------
+    # Similarity search
+    # ---------------------
     def similarity_search(
-        self, 
+        self,
         query_embedding: np.ndarray,
         k: int = 4,
         file_hash: Optional[str] = None,
-        score_threshold: float = 0.0
+        score_threshold: float = 0.0,
     ) -> List[Dict[str, Any]]:
-        """Perform similarity search using FAISS."""
-        if not self.documents:
+        """
+        Search the FAISS index for the top-k similar documents.
+
+        Returns a list of dicts with keys: id, text, metadata, score, file_hash
+
+        Score mapping: because we use inner product on normalized vectors, raw scores are in [-1, 1]
+        (cosine). We map them to [0, 1] by (score + 1) / 2 for easier thresholds.
+        """
+        if not self.documents or self.index is None:
             return []
-            
-        # Convert query_embedding to numpy array if it's not already
-        if not isinstance(query_embedding, np.ndarray):
-            query_embedding = np.array(query_embedding, dtype=np.float32)
-            
-        # Reshape for single query
-        if len(query_embedding.shape) == 1:
-            query_embedding = query_embedding.reshape(1, -1)
-        
-        # Search the index
-        distances, indices = self.index.search(query_embedding.astype('float32'), k)
-        
-        # Debug information
-        if not hasattr(self, 'documents') or not self.documents:
-            logging.error("No documents found in vector store")
+
+        q = np.array(query_embedding, dtype=np.float32)
+        if q.ndim == 1:
+            q = q.reshape(1, -1)
+
+        # Normalize query
+        faiss.normalize_L2(q)
+
+        try:
+            distances, indices = self.index.search(q, k)
+        except Exception as e:
+            logger.exception("FAISS search failed: %s", e)
             return []
-            
-        logging.info(f"Total documents in store: {len(self.documents)}")
-        logging.info(f"Indices from FAISS search: {indices}")
-        
-        # Prepare results
-        results = []
-        for i, idx in enumerate(indices[0]):
-            if idx < 0 or idx >= len(self.documents):  # Skip invalid indices
-                logging.warning(f"Skipping invalid document index: {idx}")
+
+        results: List[Dict[str, Any]] = []
+        # distances contain inner product scores if IndexFlatIP; higher is better
+        for rank, idx in enumerate(indices[0]):
+            if idx < 0 or idx >= len(self.documents):
+                logger.warning("Received invalid index from FAISS: %s", idx)
                 continue
-                
+
             try:
                 doc = self.documents[idx]
-                
-                # Get metadata (default to empty dict if not present)
-                metadata = getattr(doc, 'metadata', {}) or {}
-                doc_file_hash = metadata.get('file_hash')
-                
-                # Skip if file_hash filter is provided and doesn't match
+                meta = getattr(doc, "metadata", {}) or {}
+                doc_file_hash = meta.get("file_hash")
+                # If caller requested a file-specific search, filter by file_hash
                 if file_hash and doc_file_hash != file_hash:
                     continue
-                    
-                # Convert L2 distance to similarity score (1 / (1 + distance))
-                distance = float(distances[0][i])
-                similarity = 1.0 / (1.0 + distance)
-                
-                if similarity >= score_threshold:
-                    results.append({
-                        'id': metadata.get('id', ''),
-                        'text': getattr(doc, 'page_content', ''),
-                        'metadata': metadata,
-                        'score': similarity,
-                        'file_hash': doc_file_hash
-                    })
+
+                raw_score = float(distances[0][rank])
+                mapped_score = (raw_score + 1.0) / 2.0  # map [-1,1] -> [0,1]
+
+                if mapped_score >= score_threshold:
+                    results.append(
+                        {
+                            "id": meta.get("id", ""),
+                            "text": getattr(doc, "page_content", ""),
+                            "metadata": meta,
+                            "score": mapped_score,
+                            "file_hash": doc_file_hash,
+                        }
+                    )
             except Exception as e:
-                logging.error(f"Error processing document: {e}")
-        
+                logger.exception("Error processing search result idx=%s: %s", idx, e)
+
         return results
 
+
+# -------------------------
+# Convenience helpers
+# -------------------------
 def create_embeddings(
     texts: List[str],
     metadatas: List[Dict[str, Any]],
     ids: List[str],
     file_hash: str,
-    model: SentenceTransformer,
-    vector_store: 'VectorStore'  # Use string annotation to avoid circular import
+    model,
+    vector_store: "VectorStore",
 ):
-    """Create and store embeddings using FAISS."""
+    """
+    Create embeddings with a SentenceTransformer-like `model` and store them in vector_store.
+
+    - `model` must implement .encode(list_of_texts, show_progress_bar=False, convert_to_numpy=True)
+      (or a compatible return format).
+    - This function normalizes embeddings (cosine semantics) and persists them via vector_store.add_documents.
+    """
     try:
-        # Generate embeddings using the provided model
-        logger.info(f"Generating embeddings for {len(texts)} texts...")
-        embeddings = model.encode(texts, show_progress_bar=True, batch_size=32)
-        logger.info("Embeddings generated successfully")
-        
-        # Normalize embeddings to unit length (important for cosine similarity)
+        logger.info(f"Generating embeddings for {len(texts)} texts")
+        embeddings = model.encode(texts, show_progress_bar=False, convert_to_numpy=True)
+        embeddings = np.array(embeddings, dtype=np.float32)
+
+        # Normalize rows for cosine (inner product)
         faiss.normalize_L2(embeddings)
-        
-        # Create documents with embeddings
-        documents = []
-        for i, (text, embedding) in enumerate(zip(texts, embeddings)):
-            # Include the ID in the metadata
+
+        documents: List[Document] = []
+        for i, (text, emb) in enumerate(zip(texts, embeddings)):
             metadata = metadatas[i].copy() if i < len(metadatas) else {}
-            metadata.update({
-                'id': ids[i],
-                'file_hash': file_hash,
-                'embedding': embedding  # Store embedding in metadata for now
-            })
-            
-            doc = Document(
-                page_content=text,
-                metadata=metadata
+            metadata.update(
+                {
+                    "id": ids[i] if i < len(ids) else "",
+                    "file_hash": file_hash,
+                    "embedding": emb.astype(np.float32).tolist(),
+                }
             )
+            doc = Document(page_content=text, metadata=metadata)
             documents.append(doc)
-        
-        # Add to vector store with the model
-        vector_store.add_documents(documents, model=model)
-        logger.info(f"Successfully stored {len(documents)} embeddings in the vector store")
-        
+
+        # Add documents to vector store (model not needed here because embeddings already provided)
+        vector_store.add_documents(documents, model=None)
+        logger.info(f"Stored {len(documents)} embeddings in vector store")
     except Exception as e:
-        logger.error(f"Error creating embeddings: {str(e)}", exc_info=True)
+        logger.exception("Error creating embeddings: %s", e)
         raise
 
-def reset_database():
-    """Reset the vector store by deleting the index directory."""
+
+def reset_database(index_path: str = "faiss_index") -> bool:
+    """Delete the FAISS index directory (careful!). Returns True if removed."""
     import shutil
-    if os.path.exists("faiss_index"):
-        shutil.rmtree("faiss_index")
+
+    if os.path.exists(index_path):
+        shutil.rmtree(index_path)
         return True
     return False
 
+
 def get_or_create_collection(file_hash: str, vector_store: VectorStore) -> bool:
-    """Check if a collection (file) exists in the vector store."""
-    # In FAISS, we'll just check if we have any documents with this file_hash
-    results = vector_store.similarity_search(
-        query_embedding=np.zeros(vector_store.dimension),  # Dummy query
-        k=30,
-        file_hash=file_hash
-    )
-    return len(results) > 0
+    """
+    Check if any document with the given file_hash exists in the vector store.
+    Returns True if found.
+    """
+    try:
+        for d in vector_store.documents:
+            meta = getattr(d, "metadata", {}) or {}
+            if meta.get("file_hash") == file_hash:
+                return True
+        return False
+    except Exception as e:
+        logger.exception("Error checking collection existence: %s", e)
+        return False
