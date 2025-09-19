@@ -2,39 +2,32 @@ version: "3.1"
 
 intents:
   - greet
-  - goodbye
-  - affirm
-  - deny
   - mood_great
   - mood_unhappy
+  - affirm
+  - deny
+  - goodbye
   - bot_challenge
-
-entities: []
-
-slots:
-  session_started_metadata:
-    type: any
-    influence_conversation: false
-    mappings:
-      - type: from_entity
-        entity: session_started_metadata
 
 responses:
   utter_greet:
-    - text: "Hey! How are you?"
-  utter_cheer_up:
-    - text: "Here is something to cheer you up:"
-  utter_did_that_help:
-    - text: "Did that help you?"
-  utter_happy:
-    - text: "Great, carry on!"
+    - text: "Hello! How can I help you today?"
+
+  utter_mood_great:
+    - text: "That's awesome! 😃"
+
+  utter_mood_unhappy:
+    - text: "I'm sorry to hear that. Do you want to talk about it?"
+
   utter_goodbye:
-    - text: "Bye!"
+    - text: "Goodbye! Take care 👋"
+
   utter_iamabot:
     - text: "I am a bot, powered by Rasa."
-  utter_default:
-    - text: "I'm not sure how to respond to that."
+
+# remove duplicate slot definitions
+slots: {}
 
 session_config:
-  session_expiration_time: 60  # minutes
+  session_expiration_time: 60
   carry_over_slots_to_new_session: true
