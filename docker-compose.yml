@@ -22,36 +22,22 @@ services:
       postgres:
         condition: service_healthy
 
-  rasa-train:
-    build: 
-      context: ./rasa
-      dockerfile: Dockerfile
-    user: "1001"
-    volumes:
-      - ./rasa:/app
-      - rasa_data:/app/models
-    working_dir: /app
-    command: ["run", "--enable-api", "--cors", "*", "--debug", "--endpoints", "endpoints.yml"]
-    environment:
-      - RASA_ENVIRONMENT=${RASA_ENV:-production}
-      - RASA_LOCAL_PATH=/app
-      - RASA_DOMAIN=/app/domain.yml
-      - RASA_DATA=/app/data
-      - RASA_MODELS=/app/models
 
   rasa:
     build: 
       context: ./rasa
       dockerfile: Dockerfile
     user: "1001"
-    ports:
-      - "5005:5005"
     volumes:
       - ./rasa:/app
       - rasa_data:/app/models
     working_dir: /app
+    # Start Rasa in API mode with CORS enabled
+    command: ["run", "--enable-api", "--cors", "*", "--debug", "--endpoints", "endpoints.yml", "--port", "5005"]
+    ports:
+      - "5005:5005"
     environment:
-      - RASA_ENVIRONMENT=${RASA_ENV:-production}
+      - RASA_ENVIRONMENT=${RASA_ENV:-development}
       - RASA_ACTIONS_URL=http://actions:5055/webhook
       - RASA_ACTIONS_HOST=0.0.0.0
       - RASA_ACTIONS_PORT=5055
@@ -59,12 +45,10 @@ services:
       - RASA_DOMAIN=/app/domain.yml
       - RASA_DATA=/app/data
       - RASA_MODELS=/app/models
+      - RASA_TRAINING_DATA=/app/data
     depends_on:
       actions:
         condition: service_started
-      rasa-train:
-        condition: service_completed_successfully
-    command: ["run", "--enable-api", "--cors", "*", "--debug", "--endpoints", "endpoints.yml", "--model", "/app/models/model.tar.gz"]
 
   actions:
     build: 

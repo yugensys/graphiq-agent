@@ -16,7 +16,8 @@ slots:
     type: any
     influence_conversation: false
     mappings:
-      - type: custom
+      - type: from_entity
+        entity: session_started_metadata
 
 responses:
   utter_greet:
