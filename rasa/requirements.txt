@@ -1,0 +1,8 @@
+rasa==3.6.20
+rasa-sdk==3.6.0
+python-socketio==5.8.0
+python-engineio==4.5.1
+SQLAlchemy==1.4.46
+PyJWT==2.4.0
+twilio==7.13.0
+python-dotenv==0.21.0

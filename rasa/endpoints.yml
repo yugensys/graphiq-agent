@@ -1,0 +1,8 @@
+action_endpoint:
+  url: "http://actions:5055/webhook"
+
+tracker_store:
+  type: memory
+
+event_broker:
+  type: memory

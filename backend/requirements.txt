@@ -24,5 +24,8 @@ pydantic[email]
 sqlalchemy-migrate              
 psycopg2-binary==2.9.9
 
+# HTTP client for making requests to Rasa server
+httpx>=0.24.0
+
 google-cloud-logging             
 
