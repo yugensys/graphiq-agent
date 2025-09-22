@@ -30,7 +30,7 @@ services:
     user: "1001"
     volumes:
       - ./rasa:/app
-      - rasa_data:/app/models
+      - ./rasa/models:/app/models
     working_dir: /app
     # Start Rasa in API mode with CORS enabled
     command: ["run", "--enable-api", "--cors", "*", "--debug", "--endpoints", "endpoints.yml", "--port", "5005"]

@@ -6,6 +6,7 @@ import os
 router = APIRouter()
 
 RASA_SERVER_URL = os.getenv("RASA_SERVER_URL", "http://rasa:5005")
+print(f"Using RASA_SERVER_URL: {RASA_SERVER_URL}")  # Debug log
 
 class Message(BaseModel):
     sender: str = "user"
@@ -17,7 +18,8 @@ async def chat(message: Message):
     Send a message to the Rasa server and get the bot's response.
     """
     try:
-        async with httpx.AsyncClient() as client:
+        print(f"Sending message to Rasa: {message.message}")  # Debug log
+        async with httpx.AsyncClient(timeout=30.0) as client:  # Added timeout
             # Send the message to Rasa
             response = await client.post(
                 f"{RASA_SERVER_URL}/webhooks/rest/webhook",
