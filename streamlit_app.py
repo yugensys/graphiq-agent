@@ -739,7 +739,7 @@ def execute_sql_on_df(sql: str, df: pd.DataFrame, max_retries: int = 2) -> pd.Da
         
         # If the result is empty but the query should return something,
         # try to provide more helpful error information
-        if result.empty and ('count(' in sql.lower() or 'sum(' in sql.lower()):
+        if result.empty and ('co-unt(' in sql.lower() or 'sum(' in sql.lower()):
             logger.warning("Empty result for aggregation query")
             # Show sample data for debugging
             sample = df_clean.head(5)
@@ -803,7 +803,7 @@ if st.button("Generate Charts") and user_prompt:
                     logger.info(f"Generated SQL: {generated_sql}")
                     st.sidebar.code(generated_sql, language="sql")
 
-                    # Execute SQL on in-memory df
+                      # Execute SQL on in-memory df
                     query_result_df = execute_sql_on_df(generated_sql, st.session_state.df)
 
                     if query_result_df is None or query_result_df.empty:
@@ -1037,62 +1037,68 @@ Return ONLY the insight text, no markdown or formatting."""
                 chart_type = config.get('type', 'bar')
                 title = config.get('title', 'Chart')
                 # Skip if required fields are missing
+                # Create a new figure for each chart
+                fig = go.Figure()
+                
                 if chart_type == 'pie':
                     if not all(key in config for key in ['values', 'labels']) or not config['values'] or not config['labels']:
                         st.warning(f"Skipping invalid pie chart config: missing required fields")
                         continue
-                else:
-                    if not all(key in config for key in ['x', 'y']) or not config['x'] or not config['y']:
-                        st.warning(f"Skipping invalid {chart_type} chart config: missing required fields")
-                        continue
-                if chart_type == 'pie':
-                    fig = px.pie(
+                        
+                    fig.add_trace(go.Pie(
+                        labels=config.get('labels', []),
                         values=config.get('values', []),
-                        names=config.get('labels', []),
+                        textinfo='label+percent',
+                        insidetextorientation='radial',
+                        marker_colors=config.get('marker_colors', None),
+                        hovertemplate='<b>%{label}</b><br>Value: %{value}<br>Percentage: %{percent}<extra></extra>'
+                    ))
+                    
+                    fig.update_layout(
                         title=title,
-                        color_discrete_sequence=[config.get('color', '#4285F4')] if 'color' in config else None
+                        showlegend=True,
+                        margin=dict(l=50, r=50, t=50, b=50)
                     )
-                else:
-                    # Create figure with primary y-axis
-                    fig = go.Figure()
                     
-                    # Add primary trace
-                    if chart_type == 'bar':
-                        fig.add_trace(go.Bar(
-                            x=config.get('x', []),
-                            y=config.get('y', []),
-                            name=config.get('y_label', 'Y'),
-                            marker_color=config.get('color', '#4285F4'),
-                            orientation=config.get('orientation', 'v')
-                        ))
-                    elif chart_type == 'line':
-                        fig.add_trace(go.Scatter(
-                            x=config.get('x', []),
-                            y=config.get('y', []),
-                            name=config.get('y_label', 'Y'),
-                            line=dict(color=config.get('color', '#4285F4')),
-                            mode='lines+markers'
-                        ))
-                    else:  # Default to scatter
-                        fig.add_trace(go.Scatter(
-                            x=config.get('x', []),
-                            y=config.get('y', []),
-                            name=config.get('y_label', 'Y'),
-                            mode='markers',
-                            marker=dict(color=config.get('color', '#4285F4'))
-                        ))
+                elif chart_type == 'bar':
+                    fig.add_trace(go.Bar(
+                        x=config.get('x', []),
+                        y=config.get('y', []),
+                        name=config.get('y_label', 'Y'),
+                        marker_color=config.get('color', '#4285F4'),
+                        orientation=config.get('orientation', 'v')
+                    ))
                     
-                    # Add secondary trace if exists
-                    if 'y2' in config:
-                        fig.add_trace(go.Scatter(
-                            x=config.get('x', []),
-                            y=config.get('y2'),
-                            name=config.get('y2_label', 'Y2'),
-                            line=dict(color=config.get('color2', '#EA4335')),
-                            yaxis='y2'
-                        ))
+                elif chart_type == 'line':
+                    fig.add_trace(go.Scatter(
+                        x=config.get('x', []),
+                        y=config.get('y', []),
+                        name=config.get('y_label', 'Y'),
+                        line=dict(color=config.get('color', '#4285F4')),
+                        mode='lines+markers'
+                    ))
                     
-                    # Update layout
+                else:  # Default to scatter
+                    fig.add_trace(go.Scatter(
+                        x=config.get('x', []),
+                        y=config.get('y', []),
+                        name=config.get('y_label', 'Y'),
+                        mode='markers',
+                        marker=dict(color=config.get('color', '#4285F4'))
+                    ))
+                
+                # Add secondary trace if exists (for bar, line, or scatter)
+                if chart_type in ['bar', 'line', 'scatter'] and 'y2' in config:
+                    fig.add_trace(go.Scatter(
+                        x=config.get('x', []),
+                        y=config.get('y2'),
+                        name=config.get('y2_label', 'Y2'),
+                        line=dict(color=config.get('color2', '#EA4335')),
+                        yaxis='y2'
+                    ))
+                
+                # Update layout for non-pie charts
+                if chart_type != 'pie':
                     fig.update_layout(
                         title=title,
                         xaxis_title=config.get('x_label', 'X'),
