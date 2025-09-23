@@ -2,32 +2,148 @@ version: "3.1"
 
 intents:
   - greet
-  - mood_great
-  - mood_unhappy
+  - goodbye
   - affirm
   - deny
-  - goodbye
-  - bot_challenge
+  - upload_file
+  - ask_summary
+  - ask_charts
+  - request_chart
+  - specify_columns
+  - choose_chart
+  - ask_help
+  - cancel
+
+entities:
+  - column
+  - chart_type
+  - file_type
+  - aggregation
+
+slots:
+  uploaded_file:
+    type: text
+    influence_conversation: false
+    mappings:
+      - type: from_text
+
+  file_name:
+    type: text
+    influence_conversation: false
+    mappings:
+      - type: from_text
+
+  chart_type:
+    type: text
+    influence_conversation: true
+    mappings:
+      - type: from_entity
+        entity: chart_type
+      - type: from_text
+
+  chart_columns:
+    type: list
+    influence_conversation: true
+    mappings:
+      - type: from_entity
+        entity: column
+      - type: from_text
+
+  aggregation:
+    type: text
+    influence_conversation: true
+    mappings:
+      - type: from_entity
+        entity: aggregation
+      - type: from_text
+
+  last_user_message:
+    type: text
+    influence_conversation: false
+    mappings:
+      - type: from_text
 
 responses:
   utter_greet:
-    - text: "Hello! How can I help you today?"
+    - text: "Hi! Upload a CSV/Excel file or tell me what you'd like to do (summary, chart, insights)."
 
-  utter_mood_great:
-    - text: "That's awesome! 😃"
+  utter_ask_upload:
+    - text: "Please upload your CSV or Excel file (or provide a link)."
 
-  utter_mood_unhappy:
-    - text: "I'm sorry to hear that. Do you want to talk about it?"
+  utter_ask_chart_type:
+    - text: "Which chart type would you like? (bar / line / scatter / histogram / pie)"
+
+  utter_ask_columns:
+    - text: "Which columns should I use for this chart? (e.g., 'sales' and 'month')"
+  
+  utter_no_file:
+    - text: "I don't see a dataset yet. Please upload a CSV or Excel file first."
+
+  utter_chart_generated:
+    - text: "Here's the chart I generated."
+
+  utter_dataset_summary:
+    - text: "Summary for the dataset (showing top-level stats)."
+
+  utter_help:
+    - text: "I can generate charts and insights from it. Upload a file and ask me for a chart or summary."
 
   utter_goodbye:
-    - text: "Goodbye! Take care 👋"
+    - text: "Goodbye! If you need more charts, upload a new file."
+
+  utter_default:
+    - text: "Sorry, I didn't understand. Can you rephrase or try a different request?"
 
   utter_iamabot:
-    - text: "I am a bot, powered by Rasa."
+    - text: "I am a bot, powered by Rasa. How can I help you with your dataset?"
 
-# remove duplicate slot definitions
-slots: {}
+forms:
+  chart_form:
+    required_slots:
+      - chart_type
+      - chart_columns
+
+actions:
+  - action_handle_file_upload
+  - action_generate_chart
+  - action_dataset_summary
+  - action_clear_session
 
 session_config:
   session_expiration_time: 60
   carry_over_slots_to_new_session: true
+
+
+# version: "3.1"
+
+# intents:
+#   - greet
+#   - mood_great
+#   - mood_unhappy
+#   - affirm
+#   - deny
+#   - goodbye
+#   - bot_challenge
+
+# responses:
+#   utter_greet:
+#     - text: "Hello! How can I help you today?"
+
+#   utter_mood_great:
+#     - text: "That's awesome! 😃"
+
+#   utter_mood_unhappy:
+#     - text: "I'm sorry to hear that. Do you want to talk about it?"
+
+#   utter_goodbye:
+#     - text: "Goodbye! Take care 👋"
+
+#   utter_iamabot:
+#     - text: "I am a bot, powered by Rasa."
+
+# # remove duplicate slot definitions
+# slots: {}
+
+# session_config:
+#   session_expiration_time: 60
+#   carry_over_slots_to_new_session: true

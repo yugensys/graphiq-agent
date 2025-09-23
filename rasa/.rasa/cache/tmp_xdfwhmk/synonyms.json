@@ -1,0 +1,12 @@
+{
+  "sales": "sales",
+  "month": "month",
+  "revenue": "revenue",
+  "cost": "cost",
+  "temperature": "temperature",
+  "date": "date",
+  "x": "x",
+  "y": "y",
+  "age": "age",
+  "category": "category"
+}

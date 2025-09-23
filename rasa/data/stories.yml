@@ -1,20 +1,68 @@
 version: "3.1"
 stories:
-- story: happy path
+- story: greet then ask help
   steps:
   - intent: greet
   - action: utter_greet
-  - intent: mood_great
-  - action: utter_mood_great
+  - intent: ask_help
+  - action: utter_help
 
-- story: sad path
+- story: upload then ask summary
   steps:
-  - intent: greet
-  - action: utter_greet
-  - intent: mood_unhappy
-  - action: utter_mood_unhappy
+  - intent: upload_file
+  - action: action_handle_file_upload
+  - intent: ask_summary
+  - action: action_dataset_summary
+  - action: utter_dataset_summary
+
+- story: happy chart flow (explicit)
+  steps:
+  - intent: upload_file
+  - action: action_handle_file_upload
+  - intent: request_chart
+  - action: chart_form
+  - active_loop: chart_form
+  - intent: affirm
+  - action: action_generate_chart
+  - action: utter_chart_generated
+
+- story: quick chart (choose chart then columns)
+  steps:
+  - intent: upload_file
+  - action: action_handle_file_upload
+  - intent: choose_chart
+  - action: utter_ask_columns
+  - intent: specify_columns
+  - action: action_generate_chart
+  - action: utter_chart_generated
 
 - story: goodbye
   steps:
   - intent: goodbye
   - action: utter_goodbye
+
+# Additional stories for ask_charts
+- story: ask charts when no file uploaded
+  steps:
+  - intent: ask_charts
+  - slot_was_set:
+      - uploaded_file: null
+  - action: utter_no_file
+
+- story: ask charts when file uploaded
+  steps:
+  - intent: upload_file
+  - action: action_handle_file_upload
+  - intent: ask_charts
+  - action: utter_ask_chart_type
+
+- story: user cancels
+  steps:
+  - intent: cancel
+  - action: action_clear_session
+  - action: utter_goodbye
+
+- story: user denies / says no
+  steps:
+  - intent: deny
+  - action: utter_default

@@ -1,82 +1,101 @@
 version: "3.1"
-
 nlu:
 - intent: greet
   examples: |
-    - hey
-    - hello
     - hi
-    - hello there
+    - hii
+    - namaste
+    
+    - hello
+    - hey
+    - hey there
     - good morning
     - good evening
-    - moin
-    - hey there
-    - let's go
-    - hey dude
-    - goodmorning
-    - good evening
-    - good afternoon
 
 - intent: goodbye
   examples: |
-    - cu
-    - good by
-    - cee you later
-    - good night
     - bye
     - goodbye
-    - i am off
-    - have a nice day
-    - see you later
+    - see you
     - talk to you later
+    - i'm off
 
 - intent: affirm
   examples: |
     - yes
-    - y
-    - indeed
-    - of course
-    - that sounds good
-    - correct
+    - sure
+    - okay
+    - yep
+    - sounds good
 
 - intent: deny
   examples: |
     - no
-    - n
-    - never
-    - I don't think so
-    - don't like that
-    - no way
-    - not really
+    - nope
+    - not now
+    - don't
 
-- intent: mood_great
+- intent: upload_file
   examples: |
-    - perfect
-    - very good
-    - great
-    - amazing
-    - feeling like a king
-    - wonderful
-    - I am feeling very good
-    - I am great
-    - I'm good
+    - I uploaded a file
+    - I have a csv
+    - I uploaded dataset.csv
+    - here's my file
+    - I added an excel file
+    - uploaded data.xlsx
+    - I want to upload a file
+    - I will upload a CSV
 
-- intent: mood_unhappy
+- intent: ask_summary
   examples: |
-    - sad
-    - very sad
-    - unhappy
-    - bad
-    - very bad
-    - awful
-    - terrible
-    - not very good
-    - extremely sad
-    - so sad
+    - summarize dataset
+    - give me a summary
+    - show dataset summary
+    - dataset stats
+    - tell me column stats
 
-- intent: bot_challenge
+- intent: ask_charts
   examples: |
-    - are you a bot?
-    - are you a human?
-    - am I talking to a bot?
-    - am I talking to a human?
+    - what charts can I make?
+    - suggest chart types
+    - show me charts
+    - which charts are available
+
+- intent: request_chart
+  examples: |
+    - show me a bar chart of [sales](column) over [month](column)
+    - plot [revenue](column) vs [cost](column)
+    - line chart of [temperature](column) by [date](column)
+    - make a scatter plot of [x](column) and [y](column)
+    - histogram of [age](column)
+    - create a pie chart for [category](column)
+
+- intent: specify_columns
+  examples: |
+    - use columns [sales](column) and [date](column)
+    - select [revenue](column)
+    - columns [x](column), [y](column)
+
+- intent: choose_chart
+  examples: |
+    - bar
+    - line
+    - scatter
+    - histogram
+    - pie
+    - bar chart
+    - line chart
+
+- intent: ask_help
+  examples: |
+    - help
+    - what can you do
+    - how to use this
+
+- intent: cancel
+  examples: |
+    - cancel
+    - start over
+    - forget it
+
+

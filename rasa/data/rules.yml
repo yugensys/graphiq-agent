@@ -1,0 +1,51 @@
+version: "3.1"
+rules:
+# deterministic replies for single-turn intents --------------------------------
+- rule: Reply to greeting
+  steps:
+  - intent: greet
+  - action: utter_greet
+
+- rule: Reply to goodbye
+  steps:
+  - intent: goodbye
+  - action: utter_goodbye
+
+- rule: Reply to help request
+  steps:
+  - intent: ask_help
+  - action: utter_help
+
+- rule: Reply to bot challenge
+  steps:
+  - intent: bot_challenge
+  - action: utter_iamabot
+
+- rule: Cancel and clear session
+  steps:
+  - intent: cancel
+  - action: action_clear_session
+  - action: utter_goodbye
+
+# Keep chart_form submission deterministic --------------------------------------
+- rule: Submit chart form
+  condition:
+  - active_loop: chart_form
+  steps:
+  - action: chart_form
+  - active_loop: null
+  - action: action_generate_chart
+  - action: utter_chart_generated
+
+# Deterministic handler for upload_file (single-step)
+- rule: Handle file upload (single step)
+  steps:
+  - intent: upload_file
+  - action: action_handle_file_upload
+
+# Fallback ----------------------------------------------------------------------
+- rule: Fallback to default utterance
+  steps:
+  - intent: nlu_fallback
+  - action: action_default_fallback
+  - action: utter_default
