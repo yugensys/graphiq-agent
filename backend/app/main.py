@@ -5,7 +5,6 @@ from fastapi import FastAPI
 from contextlib import asynccontextmanager
 from sqlalchemy.exc import SQLAlchemyError
 from app.api.v1 import api_router
-from app.api.chat import router as chat_router
 
 from app.config.settings import settings
 #from app.api import api_router
@@ -65,6 +64,15 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
+# Add CORS middleware
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["http://localhost:3000", "http://localhost:5173"], 
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
 # === Middlewares & Exception Handlers ===
 add_middlewares(app)
 app.add_exception_handler(StarletteHTTPException, http_exception_handler)
@@ -73,7 +81,6 @@ app.add_exception_handler(Exception, unhandled_exception_handler)
 
 # === Routers ===
 app.include_router(api_router, prefix="/api/v1")
-app.include_router(chat_router, prefix="/api/chat", tags=["chat"])
 
 # === Utility Routes ===
 @app.get("/health")

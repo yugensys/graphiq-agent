@@ -2,15 +2,12 @@ from fastapi import APIRouter, HTTPException
 import httpx
 from pydantic import BaseModel
 import os
-
-router = APIRouter()
+from app.schemas.chat import Message
+router = APIRouter(prefix="/chat",tags=["chat"])
 
 RASA_SERVER_URL = os.getenv("RASA_SERVER_URL", "http://rasa:5005")
 print(f"Using RASA_SERVER_URL: {RASA_SERVER_URL}")  # Debug log
 
-class Message(BaseModel):
-    sender: str = "user"
-    message: str
 
 @router.post("/chat")
 async def chat(message: Message):
@@ -18,8 +15,8 @@ async def chat(message: Message):
     Send a message to the Rasa server and get the bot's response.
     """
     try:
-        print(f"Sending message to Rasa: {message.message}")  # Debug log
-        async with httpx.AsyncClient(timeout=30.0) as client:  # Added timeout
+        print(f"Sending message to Rasa: {message.message}")  
+        async with httpx.AsyncClient(timeout=30.0) as client:  
             # Send the message to Rasa
             response = await client.post(
                 f"{RASA_SERVER_URL}/webhooks/rest/webhook",
