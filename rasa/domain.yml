@@ -6,20 +6,19 @@ intents:
   - affirm
   - deny
   - upload_file
+  - uploaded_file
   - ask_summary
   - ask_charts
-  - request_chart
-  - specify_columns
-  - choose_chart
+  - dataset_query
   - ask_help
-  - cancel
+  - quit
+  - bot_challenge
+  - nlu_fallback
 
-entities:
-  - column
-  - chart_type
-  - file_type
-  - aggregation
+# Entities (none required for routing; backend will parse dataset specifics)
+entities: []
 
+# Slots (do not influence conversation directly for most; set/cleared by actions)
 slots:
   uploaded_file:
     type: text
@@ -27,123 +26,81 @@ slots:
     mappings:
       - type: from_text
 
-  file_name:
+  file_id:
     type: text
     influence_conversation: false
     mappings:
       - type: from_text
 
-  chart_type:
-    type: text
-    influence_conversation: true
-    mappings:
-      - type: from_entity
-        entity: chart_type
-      - type: from_text
-
-  chart_columns:
-    type: list
-    influence_conversation: true
-    mappings:
-      - type: from_entity
-        entity: column
-      - type: from_text
-
-  aggregation:
-    type: text
-    influence_conversation: true
-    mappings:
-      - type: from_entity
-        entity: aggregation
-      - type: from_text
-
-  last_user_message:
+  mdl:
     type: text
     influence_conversation: false
     mappings:
       - type: from_text
 
+  last_sql:
+    type: text
+    influence_conversation: false
+    mappings:
+      - type: from_text
+
+  last_query:
+    type: text
+    influence_conversation: false
+    mappings:
+      - type: from_text
+
+  table_id:
+    type: text
+    influence_conversation: false
+    mappings:
+      - type: from_text
+
+
+# Responses (utterances)
 responses:
   utter_greet:
-    - text: "Hi! Upload a CSV/Excel file or tell me what you'd like to do (summary, chart, insights)."
+    - text: "Hi! You can upload a CSV/Excel file to get insights and charts. Need help?"
 
   utter_ask_upload:
-    - text: "Please upload your CSV or Excel file (or provide a link)."
+    - text: "Sure — please upload your CSV or Excel file (or provide a public link)."
+
+  utter_after_upload:
+    - text: "Got it — file received. You can now ask questions about the dataset."
 
   utter_ask_chart_type:
     - text: "Which chart type would you like? (bar / line / scatter / histogram / pie)"
 
-  utter_ask_columns:
-    - text: "Which columns should I use for this chart? (e.g., 'sales' and 'month')"
-  
   utter_no_file:
     - text: "I don't see a dataset yet. Please upload a CSV or Excel file first."
 
   utter_chart_generated:
-    - text: "Here's the chart I generated."
-
-  utter_dataset_summary:
-    - text: "Summary for the dataset (showing top-level stats)."
+    - text: "Done — Generated the chart and insights."
 
   utter_help:
-    - text: "I can generate charts and insights from it. Upload a file and ask me for a chart or summary."
+    - text: "I can generate charts and insights from your uploaded dataset. Upload a file and then ask a question (e.g., 'show sales by month')."
 
   utter_goodbye:
-    - text: "Goodbye! If you need more charts, upload a new file."
+    - text: "Goodbye! Upload a new file anytime for more analysis."
 
   utter_default:
-    - text: "Sorry, I didn't understand. Can you rephrase or try a different request?"
+    - text: "Sorry, I didn't understand. Try asking something like 'upload file', 'show me a chart'."
 
   utter_iamabot:
-    - text: "I am a bot, powered by Rasa. How can I help you with your dataset?"
+    - text: "I am a bot helping you create charts and insights from your dataset."
 
-forms:
-  chart_form:
-    required_slots:
-      - chart_type
-      - chart_columns
+# Forms (none in this design; backend handles dataset-specific prompts)
+forms: {}
 
+# Custom actions (these must be implemented in your actions server)
 actions:
   - action_handle_file_upload
+  - action_receive_mdl
+  - action_send_sql_to_client
+  - action_receive_table
   - action_generate_chart
-  - action_dataset_summary
   - action_clear_session
 
 session_config:
-  session_expiration_time: 60
+  session_expiration_time: 3600
   carry_over_slots_to_new_session: true
-
-
-# version: "3.1"
-
-# intents:
-#   - greet
-#   - mood_great
-#   - mood_unhappy
-#   - affirm
-#   - deny
-#   - goodbye
-#   - bot_challenge
-
-# responses:
-#   utter_greet:
-#     - text: "Hello! How can I help you today?"
-
-#   utter_mood_great:
-#     - text: "That's awesome! 😃"
-
-#   utter_mood_unhappy:
-#     - text: "I'm sorry to hear that. Do you want to talk about it?"
-
-#   utter_goodbye:
-#     - text: "Goodbye! Take care 👋"
-
-#   utter_iamabot:
-#     - text: "I am a bot, powered by Rasa."
-
-# # remove duplicate slot definitions
-# slots: {}
-
-# session_config:
-#   session_expiration_time: 60
-#   carry_over_slots_to_new_session: true

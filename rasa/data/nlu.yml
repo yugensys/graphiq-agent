@@ -4,14 +4,47 @@ nlu:
   examples: |
     - hi
     - hii
-    - namaste
-    
-    - hello
+    - hiii
     - hey
+    - hello
+    - helo
     - hey there
     - good morning
     - good evening
-
+    - namaste
+    - namaskar
+    - hola
+    - what's up
+    - yo
+    - sup
+    - knock knock
+    - hello there
+    - hi there
+    - hey buddy
+    - hey man
+    - hey dude
+    - hey friend
+    - greetings
+    - howdy
+    - hi everyone
+    - hey team
+    - hey all
+    - long time no see
+    - good afternoon
+    - good night
+    - hiya
+    - hey yo
+    - hey mate
+    - wassup
+    - yo yo
+    - what’s happening
+    - how’s it going
+    - how are you
+    - hey you
+    - hi bot
+    - hey assistant
+    - hey Rasa
+    
 - intent: goodbye
   examples: |
     - bye
@@ -19,14 +52,65 @@ nlu:
     - see you
     - talk to you later
     - i'm off
+    - bye bye
+    - cya
+    - take care
+    - see you soon
+    - see ya
+    - later
+    - later on
+    - catch you later
+    - peace
+    - good night
+    - farewell
+    - have a good day
+    - have a great evening
+    - until next time
+    - see you tomorrow
+    - ok bye
+    - alright, bye
+    - bye for now
+    - adios
+    - ciao
+    - cheers
+    - gotta go
+    - leaving now
+    - talk later
 
 - intent: affirm
   examples: |
     - yes
+    - great
     - sure
     - okay
     - yep
     - sounds good
+    - yeah
+    - yup
+    - of course
+    - definitely
+    - absolutely
+    - sure thing
+    - alright
+    - ok
+    - k
+    - cool
+    - exactly
+    - indeed
+    - that’s right
+    - correct
+    - you got it
+    - right
+    - obviously
+    - for sure
+    - no doubt
+    - agreed
+    - thanks
+    - thank you
+    - thank you very much
+    - thanku 
+    - thank u
+    
 
 - intent: deny
   examples: |
@@ -34,25 +118,61 @@ nlu:
     - nope
     - not now
     - don't
+    - nah
+    - no way
+    - not really
+    - not at all
+    - never
+    - absolutely not
+    - by no means
+    - not interested
+    - I don’t think so
+    - not today
+    - don’t want to
+    - don’t feel like it
+    - no thanks
+    - nope, thanks
+    - I’d rather not
 
 - intent: upload_file
   examples: |
-    - I uploaded a file
-    - I have a csv
-    - I uploaded dataset.csv
-    - here's my file
-    - I added an excel file
-    - uploaded data.xlsx
     - I want to upload a file
-    - I will upload a CSV
+    - can I send you a csv?
+    - let me upload my dataset
+    - I will upload a file
+    - I need to upload data
+    - I want to share a file
+    - let me send the dataset
+    - I’ll upload the excel
+    - going to upload a csv
+    - let me attach my file
+    - I want to provide data
+    - can I attach a file?
+    - need to send a file
+    - planning to upload dataset
+    - I will send it over
 
-- intent: ask_summary
+- intent: uploaded_file
   examples: |
-    - summarize dataset
-    - give me a summary
-    - show dataset summary
-    - dataset stats
-    - tell me column stats
+    - I uploaded a file
+    - file uploaded
+    - here is my dataset
+    - I just sent the excel
+    - I’ve uploaded data.csv
+    - my file is uploaded
+    - just uploaded the file
+    - uploaded successfully
+    - I dropped the file
+    - here’s the file
+    - dataset has been uploaded
+    - the file is sent
+    - file attached
+    - uploaded my data
+    - I’ve sent it across
+    - just shared the csv
+    - excel is uploaded
+    - the upload is done
+
 
 - intent: ask_charts
   examples: |
@@ -60,42 +180,114 @@ nlu:
     - suggest chart types
     - show me charts
     - which charts are available
-
-- intent: request_chart
-  examples: |
-    - show me a bar chart of [sales](column) over [month](column)
-    - plot [revenue](column) vs [cost](column)
-    - line chart of [temperature](column) by [date](column)
-    - make a scatter plot of [x](column) and [y](column)
-    - histogram of [age](column)
-    - create a pie chart for [category](column)
-
-- intent: specify_columns
-  examples: |
-    - use columns [sales](column) and [date](column)
-    - select [revenue](column)
-    - columns [x](column), [y](column)
-
-- intent: choose_chart
-  examples: |
-    - bar
-    - line
-    - scatter
-    - histogram
-    - pie
-    - bar chart
-    - line chart
+    - what kind of charts can you create?
+    - list chart options
+    - tell me the available visualizations
+    - can you show chart types?
+    - what visualizations do you support?
+    - which graphs can I make?
+    - suggest some graphs
+    - display chart options
+    - what plotting options do I have?
+    - types of charts available?
+    - show available graphs
+    - what plots can you generate?
 
 - intent: ask_help
   examples: |
+    - ?
+    - ??
     - help
     - what can you do
     - how to use this
+    - can you help me?
+    - I need some help
+    - show me how this works
+    - what are your features?
+    - how can you assist me?
+    - what do you support?
+    - guide me
+    - give me instructions
+    - what are you capable of?
+    - tell me your functions
+    - show me the commands
+    - I need guidance
+    - how does this work?
+    - explain how to use you
+    - what can you help me with?
 
-- intent: cancel
+
+- intent: quit
   examples: |
-    - cancel
-    - start over
-    - forget it
+    - quit
+    - exit
+    - close
+    - stop
+    - leave
+    - end chat
+    - end this
+    - terminate
+    - shut down
+    - I want to quit
+    - I want to exit
+    - no need now
+
+
+- intent: bot_challenge
+  examples: |
+    - are you a bot?
+    - are you a human?
+    - am I talking to a bot?
+    - am I talking to a human?
+    - who are you?
+    - what are you?
+    - are you real?
+    - are you an AI?
+    - are you a robot?
+    - am I chatting with a bot?
+    - are you alive?
+    - what kind of bot are you?
+    - are you an assistant?
+    - are you just a program?
+    - are you a person?
+    - are you actually human?
+    - you're not real, right?
+    - is this AI?
+    - is this a chatbot?
+    - are you just software?
+
+- intent: dataset_query
+  examples: |
+    - show sales by month
+    - give me top 10 products by revenue
+    - compare revenue between 2023 and 2024
+    - show me the trend of active users
+    - find average order value per customer
+    - show sales by region for last year
+    - give me a chart of revenue vs cost
+    - what are the monthly sales totals
+    - show the distribution of order value
+    - return the rows where country = India
+    - find the top customers by lifetime value
+    - show me a pivot of product category and sales
+    - plot revenue for the last 12 months
+    - I want to analyze churn rate
+    - run this query on my dataset
+    - sales vs cost
+    - plot revenue
+    - show trend
+    - avg order value
+    - customers top 5
+    - compare sales of product A and product B
+    - chart users over time
+    - list top performing regions
+    - give me stats on customer churn
+    - bar chart for revenue
+    - line chart of sales
+    - pie chart of category distribution
+
+
+
+
 
 

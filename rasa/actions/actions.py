@@ -1,113 +1,95 @@
 # rasa/actions/actions.py
+import os, json, requests
 from typing import Any, Dict, List, Text
 from rasa_sdk import Action, Tracker
 from rasa_sdk.executor import CollectingDispatcher
-from rasa_sdk.events import SlotSet, EventType
+from rasa_sdk.events import SlotSet
 
-import os
-import uuid
+BACKEND = os.environ.get("GRAPHIQ_BACKEND_URL", "http://backend:8000")
 
-# NOTE: Replace the placeholder implementations below with your real
-# charting / data-processing code (reading CSV/Excel, using pandas + matplotlib/plotly),
-# upload chart image to a hosting/location and return a URL.
-
-def save_placeholder_chart() -> str:
-    """
-    Placeholder: generate or copy a sample image and return an accessible URL/path.
-    Replace this with real chart generation code.
-    """
-    # For demo, we'll return a dummy path. In production, return remote URL or serve static file.
-    return "https://placehold.co/600x400?text=Chart+Preview"
-
-class ActionHandleFileUpload(Action):
+class ActionReceiveMDL(Action):
     def name(self) -> Text:
-        return "action_handle_file_upload"
+        return "action_receive_mdl"
 
     def run(self, dispatcher: CollectingDispatcher,
-            tracker: Tracker,
-            domain: Dict[Text, Any]) -> List[EventType]:
-        # Rasa doesn't natively receive binary files via REST webhook.
-        # Your streamlit/HF space should call your backend to upload the file and then
-        # send a message like `{"sender":"user1","message":"I uploaded data.csv","metadata":{"file_url":"https://..."}}`.
-        metadata = tracker.latest_message.get("metadata", {}) or {}
-        file_url = metadata.get("file_url") or metadata.get("uploaded_file") or None
+            tracker: Tracker, domain: Dict[Text, Any]) -> List[Dict]:
+        metadata = tracker.latest_message.get("metadata") or {}
+        mdl = metadata.get("mdl") or tracker.latest_message.get("text")
 
-        # store file url or filename in slot
-        if file_url:
-            dispatcher.utter_message(text=f"File saved: {file_url}")
-            return [SlotSet("uploaded_file", file_url), SlotSet("file_name", os.path.basename(file_url))]
+        if not mdl:
+            dispatcher.utter_message(text="I didn't receive the MDL. Please send it again.")
+            return []
+
+        # store MDL
+        dispatcher.utter_message(text="MDL received. Generating SQL...")
+        # forward to backend
+        try:
+            resp = requests.post(f"{BACKEND}/api/agent_grapher/generate_sql", json={
+                "user_id": tracker.sender_id,
+                "mdl": mdl
+            }, timeout=30)
+            resp.raise_for_status()
+            data = resp.json()
+        except Exception as e:
+            dispatcher.utter_message(text="Sorry, couldn't contact the analysis backend. Try again later.")
+            return []
+
+        sql = data.get("sql")
+        if not sql:
+            dispatcher.utter_message(text="Backend couldn't produce SQL from MDL.")
+            return []
+
+        # Save SQL in slot and send it to frontend for execution
+        dispatcher.utter_message(text="I generated SQL. Run this on your local dataset and send me the result.")
+        dispatcher.utter_message(json_message={
+            "type": "graphiq_sql",
+            "sql": sql,
+            "note": "Run this SQL on your local file and send back the resulting table (small JSON or upload to backend)."
+        })
+        return [SlotSet("mdl", json.dumps(mdl)), SlotSet("last_sql", sql)]
+
+
+class ActionReceiveTable(Action):
+    def name(self) -> Text:
+        return "action_receive_table"
+
+    def run(self, dispatcher: CollectingDispatcher,
+            tracker: Tracker, domain: Dict[Text, Any]) -> List[Dict]:
+        metadata = tracker.latest_message.get("metadata") or {}
+        table_json = metadata.get("table_json")           # small table inline
+        table_id = metadata.get("table_id")              # or id if already uploaded to backend
+
+        if not table_json and not table_id:
+            dispatcher.utter_message(text="I didn't receive the result table. Please send it or upload it so I can process it.")
+            return []
+
+        # If frontend uploaded table to backend and returned table_id
+        if table_id:
+            payload = {"user_id": tracker.sender_id, "table_id": table_id, "sql": tracker.get_slot("last_sql")}
         else:
-            dispatcher.utter_message(text="I couldn't find a file URL in your message. Please upload or provide a link.")
+            # forward the inline table to backend
+            payload = {"user_id": tracker.sender_id, "table": table_json, "sql": tracker.get_slot("last_sql")}
+
+        dispatcher.utter_message(text="Received the table — generating chart and insights now...")
+
+        try:
+            resp = requests.post(f"{BACKEND}/api/agent_grapher/process_table", json=payload, timeout=60)
+            resp.raise_for_status()
+            result = resp.json()
+        except Exception:
+            dispatcher.utter_message(text="Processing failed. Please try again later.")
             return []
 
-class ActionDatasetSummary(Action):
-    def name(self) -> Text:
-        return "action_dataset_summary"
+        chart_url = result.get("chart_url")
+        insights = result.get("insights")
 
-    def run(self, dispatcher: CollectingDispatcher,
-            tracker: Tracker,
-            domain: Dict[Text, Any]) -> List[EventType]:
-        file_url = tracker.get_slot("uploaded_file")
-        if not file_url:
-            dispatcher.utter_message(text="I don't see a dataset. Please upload a CSV/Excel file first.")
-            return []
-
-        # TODO: implement real summary logic (download file_url, pandas.read_csv/read_excel, compute stats)
-        # We'll return a placeholder summary
-        dispatcher.utter_message(text=f"Summary for file: {file_url}\n- Rows: (demo)\n- Columns: (demo)\n- Example stats: mean(sales)=123.4")
-        return []
-
-class ActionGenerateChart(Action):
-    def name(self) -> Text:
-        return "action_generate_chart"
-
-    def run(self, dispatcher: CollectingDispatcher,
-            tracker: Tracker,
-            domain: Dict[Text, Any]) -> List[EventType]:
-        file_url = tracker.get_slot("uploaded_file")
-        chart_type = tracker.get_slot("chart_type")
-        chart_columns = tracker.get_slot("chart_columns") or []
-
-        if not file_url:
-            dispatcher.utter_message(text="Please upload a dataset first.")
-            return []
-
-        # Here you would:
-        # 1. Download file_url
-        # 2. Load into pandas
-        # 3. Generate plot with matplotlib/plotly based on chart_type & columns
-        # 4. Save and serve the image (or return base64)
-        # 5. Return an image message (URL or binary) to the user
-
-        # For demo, return placeholder chart URL
-        chart_url = save_placeholder_chart()
-        dispatcher.utter_message(text="Generating chart... please wait.")
-        dispatcher.utter_message(text=f"Chart URL: {chart_url}")
-        # Optionally you can send a custom payload for UI to render image:
-        dispatcher.utter_message(json_message={"type": "chart", "url": chart_url})
-
-        # Save the last used slots for follow-ups
-        events = [
-            SlotSet("chart_type", chart_type),
-            SlotSet("chart_columns", chart_columns),
-            SlotSet("last_user_message", tracker.latest_message.get("text"))
-        ]
-        return events
-
-class ActionClearSession(Action):
-    def name(self) -> Text:
-        return "action_clear_session"
-
-    def run(self, dispatcher: CollectingDispatcher,
-            tracker: Tracker,
-            domain: Dict[Text, Any]) -> List[EventType]:
-        dispatcher.utter_message(text="Clearing session and uploaded files.")
-        # Clear relevant slots
-        return [
-            SlotSet("uploaded_file", None),
-            SlotSet("file_name", None),
-            SlotSet("chart_type", None),
-            SlotSet("chart_columns", None),
-            SlotSet("aggregation", None),
-            SlotSet("last_user_message", None)
-        ]
+        text_fallback = f"I generated the chart and insights.\n\nInsights: {insights or 'none'}"
+        dispatcher.utter_message(text=text_fallback)
+        dispatcher.utter_message(json_message={
+            "type": "graphiq_result",
+            "chart_url": chart_url,
+            "insights": insights,
+            "sql": tracker.get_slot("last_sql"),
+            "meta": result.get("meta", {})
+        })
+        return [SlotSet("table_id", result.get("table_id"))]

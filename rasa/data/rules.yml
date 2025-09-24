@@ -1,51 +1,70 @@
 version: "3.1"
 rules:
-# deterministic replies for single-turn intents --------------------------------
+
+# --- Small talk / basic intents --------------------------------------
 - rule: Reply to greeting
   steps:
-  - intent: greet
-  - action: utter_greet
+    - intent: greet
+    - action: utter_greet
 
 - rule: Reply to goodbye
   steps:
-  - intent: goodbye
-  - action: utter_goodbye
+    - intent: goodbye
+    - action: utter_goodbye
 
 - rule: Reply to help request
   steps:
-  - intent: ask_help
-  - action: utter_help
+    - intent: ask_help
+    - action: utter_help
 
 - rule: Reply to bot challenge
   steps:
-  - intent: bot_challenge
-  - action: utter_iamabot
+    - intent: bot_challenge
+    - action: utter_iamabot
 
-- rule: Cancel and clear session
+- rule: Affirm
   steps:
-  - intent: cancel
-  - action: action_clear_session
-  - action: utter_goodbye
+    - intent: affirm
+    - action: utter_default   # polite neutral reply like "Got it!" (you can customize)
 
-# Keep chart_form submission deterministic --------------------------------------
-- rule: Submit chart form
-  condition:
-  - active_loop: chart_form
+- rule: Deny
   steps:
-  - action: chart_form
-  - active_loop: null
-  - action: action_generate_chart
-  - action: utter_chart_generated
+    - intent: deny
+    - action: utter_default   # fallback-like, can also say "Okay, skipping that."
 
-# Deterministic handler for upload_file (single-step)
-- rule: Handle file upload (single step)
+# --- File upload flow ------------------------------------------------
+# - rule: Handle file upload request (before upload happens)
+#   steps:
+#     - intent: upload_file
+#     - action: utter_ask_upload
+
+# - rule: Handle uploaded file
+#   steps:
+#     - intent: uploaded_file
+#     - action: action_handle_file_upload
+
+# # --- Dataset queries -------------------------------------------------
+# - rule: Forward dataset query
+#   steps:
+#     - intent: dataset_query
+#     - action: action_generate_chart
+#     - action: utter_chart_generated
+
+# - rule: Ask charts
+#   steps:
+#     - intent: ask_charts
+#     - action: utter_ask_chart_type
+
+# --- Quit / cancel flow ----------------------------------------------
+- rule: Quit conversation
   steps:
-  - intent: upload_file
-  - action: action_handle_file_upload
+    - intent: quit
+    - action: action_clear_session
+    - action: utter_goodbye
 
-# Fallback ----------------------------------------------------------------------
+# --- Fallback --------------------------------------------------------
 - rule: Fallback to default utterance
   steps:
-  - intent: nlu_fallback
-  - action: action_default_fallback
-  - action: utter_default
+    - intent: nlu_fallback
+    - action: action_default_fallback
+    - action: utter_default

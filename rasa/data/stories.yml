@@ -1,68 +1,71 @@
 version: "3.1"
 stories:
-- story: greet then ask help
+
+# 1) Greeting then help
+- story: greet then help
   steps:
   - intent: greet
   - action: utter_greet
   - intent: ask_help
   - action: utter_help
 
-- story: upload then ask summary
+# 2) User says they will upload (guide) then confirms upload
+- story: user says they will upload then confirms
   steps:
   - intent: upload_file
+  - action: utter_ask_upload
+  - intent: uploaded_file
   - action: action_handle_file_upload
-  - intent: ask_summary
-  - action: action_dataset_summary
-  - action: utter_dataset_summary
+  - action: utter_after_upload
 
-- story: happy chart flow (explicit)
+# 3) Upload then dataset query -> full pipeline (SQL hidden, final chart+insights returned)
+- story: upload then dataset query (end-to-end)
   steps:
   - intent: upload_file
+  - action: utter_ask_upload
+  - intent: uploaded_file
   - action: action_handle_file_upload
-  - intent: request_chart
-  - action: chart_form
-  - active_loop: chart_form
-  - intent: affirm
+  - action: utter_after_upload
+  - intent: dataset_query
+  - action: action_receive_mdl          # send MDL to backend, receive SQL
+  - action: action_send_sql_to_client   # (internal action: forwards SQL to frontend for execution)
+  - intent: table_result                # frontend executes SQL and returns resulting table (or table_id)
+  - action: action_receive_table        # forward table to backend for chart+insights generation
+  - action: action_generate_chart       # backend returns chart+insights (via Rasa)
+  - action: utter_chart_generated       # final user-facing acknowledgement (UI will render the graphiq_result)
+
+# 4) Dataset query when dataset already uploaded
+- story: dataset query after upload (already uploaded)
+  steps:
+  - intent: uploaded_file
+  - action: action_handle_file_upload
+  - intent: dataset_query
+  - action: action_receive_mdl
+  - action: action_send_sql_to_client
+  - intent: table_result
+  - action: action_receive_table
   - action: action_generate_chart
   - action: utter_chart_generated
 
-- story: quick chart (choose chart then columns)
+# 5) User asks for charts options after upload
+- story: ask charts after upload
   steps:
-  - intent: upload_file
+  - intent: uploaded_file
   - action: action_handle_file_upload
-  - intent: choose_chart
-  - action: utter_ask_columns
-  - intent: specify_columns
-  - action: action_generate_chart
-  - action: utter_chart_generated
+  - intent: ask_charts
+  - action: utter_ask_chart_type
 
-- story: goodbye
-  steps:
-  - intent: goodbye
-  - action: utter_goodbye
-
-# Additional stories for ask_charts
-- story: ask charts when no file uploaded
+# 6) User asks for charts but no file yet
+- story: ask charts with no file
   steps:
   - intent: ask_charts
   - slot_was_set:
       - uploaded_file: null
   - action: utter_no_file
 
-- story: ask charts when file uploaded
+# 7) User quits mid-flow
+- story: user quits
   steps:
-  - intent: upload_file
-  - action: action_handle_file_upload
-  - intent: ask_charts
-  - action: utter_ask_chart_type
-
-- story: user cancels
-  steps:
-  - intent: cancel
+  - intent: quit
   - action: action_clear_session
   - action: utter_goodbye
-
-- story: user denies / says no
-  steps:
-  - intent: deny
-  - action: utter_default
