@@ -1,0 +1,45 @@
+version: '3.8'
+
+services:
+  fastapi:
+    build: 
+      context: .
+      dockerfile: Dockerfile
+    container_name: graphiq-api
+    ports:
+      - "8000:8000"
+    volumes:
+      - .:/app
+    environment:
+      - PYTHONUNBUFFERED=1
+      - DEEPSEEK_API_KEY=${DEEPSEEK_API_KEY}
+      - EMBEDDING_MODEL=all-MiniLM-L6-v2
+      - FAISS_INDEX_PATH=/app/faiss_index
+      - LOG_LEVEL=INFO
+      - CORS_ORIGINS=*
+    command: uvicorn api:app --host 0.0.0.0 --port 8000
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    restart: unless-stopped
+
+  agent:
+    build: 
+      context: .
+      dockerfile: Dockerfile
+    container_name: graphiq-agent
+    ports:
+      - "8501:8501"
+    volumes:
+      - .:/app
+    environment:
+      - PYTHONUNBUFFERED=1
+      - FASTAPI_URL=http://fastapi:8000
+    depends_on:
+      fastapi:
+        condition: service_healthy
+    command: streamlit run streamlit_app.py --server.port=8501 --server.address=0.0.0.0
+    restart: unless-stopped

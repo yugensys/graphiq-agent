@@ -65,7 +65,7 @@ from mdl_utils import generate_mdl, mdl_to_text, generate_sql_query
 
 # Load environment variables (supports .env)
 load_dotenv()
-
+FASTAPI_URL = os.getenv("FASTAPI_URL", "http://localhost:8000")
 # ---------------------------
 # Utilities for safe arithmetic evaluation in JSON
 # ---------------------------

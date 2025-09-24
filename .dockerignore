@@ -1,0 +1,67 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Virtual Environment
+venv/
+ENV/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Project specific
+.DS_Store
+.env
+*.pkl
+*.index
+*.bin
+
+# Logs
+*.log
+
+# Local development
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+
+# Docker
+Dockerfile
+docker-compose*.yml
+
+# Streamlit
+.streamlit/
+
+# Jupyter Notebook
+.ipynb_checkpoints
+
+# FAISS index
+faiss_index/
+
+# Cache
+.cache/
+.pytest_cache/
+
+# System Files
+Thumbs.db
