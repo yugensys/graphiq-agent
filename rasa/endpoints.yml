@@ -1,5 +1,9 @@
 action_endpoint:
   url: "http://actions:5055/webhook"
+  # Wait for the action server to be available
+  wait_time_between_retries: 5   # seconds
+  # How many times to retry a request before giving up
+  retry_attempts: 10
 
 tracker_store:
   type: memory
