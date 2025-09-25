@@ -88,10 +88,12 @@ class MDLInput(BaseModel):
 
 class QueryInput(BaseModel):
     """Input model for query processing"""
-    query: str = Field(..., description="Natural language query")
-    dataset_name: str = Field(..., description="Name of the dataset to query against")
+    message: str = Field(..., description="User's message or query")
+    sender: str = Field(..., description="Identifier for the sender of the message")
+    dataset_name: str = Field(default="default_dataset", description="Name of the dataset to query against")
     top_k: Optional[int] = Field(default=3, description="Number of results to return (default: 3)")
     score_threshold: Optional[float] = Field(default=0.7, description="Minimum similarity score (0-1, default: 0.7)")
+
 
 class QueryResponse(BaseModel):
     """Response model for query results"""
@@ -271,7 +273,7 @@ async def process_query(query_input: QueryInput):
         # Get relevant context using RAG
         try:
             context = get_rag_context(
-                query=query_input.query,
+                query=query_input.message, 
                 dataset_name=query_input.dataset_name,
                 top_k=query_input.top_k,
                 score_threshold=query_input.score_threshold
@@ -321,7 +323,7 @@ async def process_query(query_input: QueryInput):
                     }
                 
                 return QueryResponse(
-                    query=query_input.query,
+                    query=query_input.message,  # Changed from query_input.query
                     error=(
                         f"No MDL found for dataset: '{query_input.dataset_name}'. "
                         f"Available datasets: {', '.join(str(d) for d in available_datasets if d) or 'None'}"
@@ -461,21 +463,21 @@ async def process_query(query_input: QueryInput):
             except json.JSONDecodeError as e:
                 logger.error(f"JSON decode error: {str(e)}")
                 return QueryResponse(
-                    query=query_input.query,
+                    query=query_input.message,  # Changed from query_input.query
                     error=f"Invalid MDL format in stored document: {str(e)}"
                 )
                 
         except Exception as e:
             logger.error(f"Error retrieving MDL: {str(e)}", exc_info=True)
             return QueryResponse(
-                query=query_input.query,
+                query=query_input.message,  # Changed from query_input.query
                 error=f"Error retrieving MDL: {str(e)}"
             )
         
         try:
             # Generate SQL query using the parsed MDL
             sql_query = generate_sql_query(
-                natural_language_query=query_input.query,
+                natural_language_query=query_input.message,  # Changed from query_input.query
                 mdl=mdl,  # Pass the parsed MDL object
                 dataset_name=query_input.dataset_name,
                 use_rag=bool(context)  # Only use RAG if we have context
@@ -494,7 +496,7 @@ async def process_query(query_input: QueryInput):
         
         # Prepare the response
         return QueryResponse(
-            query=query_input.query,
+            query=query_input.message,  # Changed from query_input.query
             sql_query=sql_query,
             context=context,
             result=None,  # You can execute the SQL here if needed
@@ -504,7 +506,7 @@ async def process_query(query_input: QueryInput):
     except Exception as e:
         logger.error(f"Error processing query: {str(e)}", exc_info=True)
         return QueryResponse(
-            query=query_input.query if 'query_input' in locals() else "",
+            query=query_input.message if 'query_input' in locals() else "",  # Changed from query_input.query
             error=f"Error processing query: {str(e)}"
         )
 
