@@ -27,6 +27,11 @@ rules:
     - intent: affirm
     - action: utter_default   # polite neutral reply like "Got it!" (you can customize)
 
+- rule: Process MDL from payload
+  steps:
+    - intent: trigger_mdl_processing
+    - action: action_process_mdl
+
 - rule: Deny
   steps:
     - intent: deny

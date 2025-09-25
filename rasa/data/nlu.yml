@@ -256,6 +256,15 @@ nlu:
     - is this a chatbot?
     - are you just software?
 
+- intent: trigger_mdl_processing
+  examples: |
+    - process mdl
+    - handle mdl
+    - process model
+    - handle model
+    - process mdl data
+    - handle mdl data
+
 - intent: dataset_query
   examples: |
     - show sales by month

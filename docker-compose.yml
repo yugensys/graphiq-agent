@@ -49,20 +49,18 @@ services:
         condition: service_started
 
   actions:
-    build: 
+    build:
       context: ./rasa
       dockerfile: Dockerfile
     user: "1001"
-    command: ["run", "--enable-api", "--cors", "*", "--debug", "--endpoints", "endpoints.yml", "--port", "5055"]
+    command: ["run", "actions", "--port", "5055"]  # This starts the actions server
     ports:
       - "5055:5055"
     volumes:
       - ./rasa/actions:/app/actions
     environment:
-      - RASA_ACTIONS_URL=http://actions:5055/webhook
       - RASA_ACTIONS_HOST=0.0.0.0
       - RASA_ACTIONS_PORT=5055
-      - RASA_ENVIRONMENT=${RASA_ENV:-production}
 
   postgres:
     image: postgres:17.5

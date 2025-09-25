@@ -5,7 +5,8 @@ from rasa_sdk import Action, Tracker
 from rasa_sdk.executor import CollectingDispatcher
 from rasa_sdk.events import SlotSet
 
-BACKEND = os.environ.get("GRAPHIQ_BACKEND_URL", "http://backend:8000")
+BACKEND = os.environ.get("GRAPHIQ_BACKEND_URL", "http://localhost:8000")
+
 
 class ActionReceiveMDL(Action):
     def name(self) -> Text:
@@ -93,3 +94,136 @@ class ActionReceiveTable(Action):
             "meta": result.get("meta", {})
         })
         return [SlotSet("table_id", result.get("table_id"))]
+import aiohttp
+from rasa_sdk import Action
+from rasa_sdk.executor import CollectingDispatcher
+from rasa_sdk import Tracker
+from typing import Dict, Any, List
+import asyncio
+
+class ActionProcessMDL(Action):
+    def name(self) -> str:
+        return "action_process_mdl"
+
+    async def run(
+        self, 
+        dispatcher: CollectingDispatcher,
+        tracker: Tracker,
+        domain: Dict[str, Any]
+    ) -> List[Dict[str, Any]]:
+        import logging
+        import socket
+        from datetime import datetime
+        
+        # Configure logging
+        logger = logging.getLogger('action_process_mdl')
+        if not logger.handlers:
+            handler = logging.StreamHandler()
+            formatter = logging.Formatter(
+                '%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+                datefmt='%Y-%m-%d %H:%M:%S'
+            )
+            handler.setFormatter(formatter)
+            logger.addHandler(handler)
+            logger.setLevel(logging.INFO)
+        
+        logger.info("=" * 50)
+        logger.info("STARTING BACKEND CONNECTION TEST")
+        logger.info("=" * 50)
+        
+        test_url = "http://backend:8080/api/v1/chat/chat"
+        test_payload = {"message": "test connection"}
+        timeout = aiohttp.ClientTimeout(total=10)  # 10 second timeout
+        
+        # Log test details
+        logger.info(f"Test URL: {test_url}")
+        logger.info(f"Test payload: {test_payload}")
+        logger.info(f"Current time: {datetime.utcnow().isoformat()}")
+        
+        try:
+            # Test DNS resolution first
+            backend_host = 'backend'
+            logger.info(f"Resolving DNS for: {backend_host}")
+            try:
+                ip = socket.gethostbyname(backend_host)
+                logger.info(f"Resolved {backend_host} to IP: {ip}")
+            except socket.gaierror as e:
+                error_msg = f"DNS resolution failed for {backend_host}: {str(e)}"
+                logger.error(error_msg)
+                dispatcher.utter_message(text=error_msg)
+                return []
+            
+            # Make the HTTP request with timeout
+            logger.info("Sending HTTP request...")
+            start_time = datetime.utcnow()
+            
+            try:
+                async with aiohttp.ClientSession(timeout=timeout) as session:
+                    async with session.post(
+                        test_url,
+                        json=test_payload,
+                        headers={"Content-Type": "application/json"}
+                    ) as response:
+                        response_time = (datetime.utcnow() - start_time).total_seconds()
+                        status = response.status
+                        response_text = await response.text()
+                        
+                        logger.info(f"Response time: {response_time:.2f}s")
+                        logger.info(f"Status: {status}")
+                        logger.info(f"Response: {response_text}")
+                        
+                        if status == 200:
+                            msg = f"✅ Backend connection successful! (Status: {status})"
+                            logger.info(msg)
+                            dispatcher.utter_message(text=msg)
+                            logger.warning(msg)
+                            dispatcher.utter_message(text=msg)
+                            
+            except asyncio.TimeoutError:
+                error_msg = "⌛ Request timed out (10s) - Backend is not responding"
+                logger.error(error_msg)
+                dispatcher.utter_message(text=error_msg)
+                return []
+            except aiohttp.ClientError as e:
+                error_msg = f"❌ HTTP client error: {str(e)}"
+                logger.error(error_msg)
+                dispatcher.utter_message(text=error_msg)
+                return []
+            except Exception as e:
+                error_msg = f"An unexpected error occurred: {str(e)}"
+                logger.error(error_msg, exc_info=True)
+                dispatcher.utter_message(text=error_msg)
+                return []
+            
+            # Process successful response
+            try:
+                response_data = await response.json()
+                if "message" in response_data:
+                    dispatcher.utter_message(text=response_data["message"])
+                if "sql" in response_data:
+                    dispatcher.utter_message(json_message={
+                        "type": "graphiq_sql",
+                        "sql": response_data["sql"],
+                        "note": "SQL generated from MDL"
+                    })
+                    return [SlotSet("last_sql", response_data["sql"])]
+            except Exception as e:
+                error_msg = f"Error processing response: {str(e)}"
+                logger.error(error_msg, exc_info=True)
+                dispatcher.utter_message(text=error_msg)
+                return []
+            
+        except aiohttp.ClientError as e:
+            error_msg = f"Error connecting to the backend: {str(e)}"
+            logger.error(error_msg, exc_info=True)
+            dispatcher.utter_message(text=error_msg)
+            return []
+            
+        except Exception as e:
+            error_msg = f"Error processing MDL: {str(e)}"
+            logger.error(error_msg, exc_info=True)
+            dispatcher.utter_message(text=error_msg)
+            return []
+            
+        return []
+        return []
