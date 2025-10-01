@@ -4,12 +4,24 @@ import requests
 from pydantic import Field
 import logging
 from datetime import datetime
-from typing import List, Optional, Any
+from typing import List, Optional, Any, Tuple
 import time
+import json
+
 
 import numpy as np
 import pandas as pd
 from pydantic import BaseModel, Field
+import re
+
+# Quick regex patterns used by the local heuristic classifier
+GREETINGS_PATTERN = re.compile(
+    r"\b(hi|hello|hey|hey there|good morning|good afternoon|good evening)\b", re.I
+)
+THANKS_PATTERN = re.compile(r"\b(thanks|thank you|thx|ty)\b", re.I)
+HELP_PATTERN = re.compile(
+    r"\b(help|how do i|what can you do|how to|what can i ask|usage|support)\b", re.I
+)
 
 # Use module logger so logs integrate with app logger config
 logger = logging.getLogger(__name__)
@@ -413,3 +425,227 @@ def load_dataframe_from_file(path: str) -> pd.DataFrame:
     except Exception as e:
         logger.exception(f"Failed to load file {path}: {e}")
         raise
+
+
+# -----------------------------
+# New: Local quick-fallback classifier (regex + column matching)
+# -----------------------------
+def _local_quick_classify(message: str, columns: Optional[List[str]] = None) -> Optional[Tuple[str, float, str]]:
+    """
+    Fast local heuristics to avoid an LLM call:
+      - greetings/help/thanks => CONVERSATION
+      - if column tokens appear in message => DATA_QUERY (low confidence)
+    Returns (label, confidence, reason) or None if heuristic can't decide.
+    """
+    msg = (message or "").strip()
+    if not msg:
+        return ("OUT_OF_SCOPE", 0.99, "empty message")
+
+    if GREETINGS_PATTERN.search(msg) or THANKS_PATTERN.search(msg) or HELP_PATTERN.search(msg):
+        return ("CONVERSATION", 0.99, "matched greeting/help/thanks pattern")
+
+    if columns:
+        # simple token match: look for exact column names (case-insensitive)
+        cols_lower = {c.lower() for c in columns}
+        words = re.findall(r"[A-Za-z0-9_]+", msg.lower())
+        matched = [w for w in words if w in cols_lower]
+        if matched:
+            return ("DATA_QUERY", 0.65, f"matched column tokens: {', '.join(sorted(set(matched))) }")
+
+    # unable to decide locally
+    return None
+
+# -----------------------------
+# New: LLM-based classifier
+# -----------------------------
+
+logger = logging.getLogger(__name__)
+
+# Metrics counters (module-level)
+LLM_SUCCESS_COUNT = 0
+LLM_PARSE_FAIL_COUNT = 0
+LLM_ERROR_COUNT = 0
+
+def _extract_json_substring(s: str) -> Optional[str]:
+    stack = []
+    start_idx = None
+    for i, ch in enumerate(s):
+        if ch == "{":
+            if start_idx is None:
+                start_idx = i
+            stack.append(ch)
+        elif ch == "}":
+            if stack:
+                stack.pop()
+                if not stack and start_idx is not None:
+                    return s[start_idx:i+1]
+    return None
+
+def _llm_classify(message: str, mdl_text: Optional[str], columns: Optional[List[str]]) -> Tuple[str, float, str]:
+    global LLM_SUCCESS_COUNT, LLM_PARSE_FAIL_COUNT, LLM_ERROR_COUNT
+
+    schema_snippet = mdl_text if mdl_text else (", ".join(columns) if columns else "No dataset/schema available.")
+    base_prompt = f"""
+You are a strict classifier. Decide whether the user's message is:
+- DATA_QUERY
+- CONVERSATION
+- OUT_OF_SCOPE
+
+Rules (follow exactly):
+1) Use only the information below. Do not produce SQL or extra explanation.
+2) Output exactly one JSON object and nothing else, with keys:
+   - label: one of "DATA_QUERY","CONVERSATION","OUT_OF_SCOPE"
+   - confidence: a float between 0.0 and 1.0
+   - reason: one short sentence.
+3) The JSON must be the only content in the response. Example:
+{{"label":"DATA_QUERY","confidence":0.95,"reason":"matched column 'age'"}}
+
+Dataset/schema (for reference):
+{schema_snippet}
+
+User message:
+{message}
+
+Now output only the JSON object.
+"""
+
+    def _call_llm_and_parse(prompt: str):
+        nonlocal message
+        try:
+            llm = get_llm_provider()
+            raw = llm.generate(prompt, temperature=0.0, max_tokens=300)
+            raw_str = (raw or "").strip()
+            logger.debug(f"Classifier LLM raw output (len={len(raw_str)}): {raw_str[:2000]}")
+
+            # try direct parse
+            try:
+                parsed = json.loads(raw_str)
+            except Exception:
+                # try extract {...}
+                js = _extract_json_substring(raw_str)
+                if js:
+                    try:
+                        parsed = json.loads(js)
+                    except Exception:
+                        parsed = None
+                else:
+                    parsed = None
+
+            if parsed:
+                label = parsed.get("label", "").strip()
+                confidence = float(parsed.get("confidence", 0.0))
+                reason = parsed.get("reason", "")[:1000]
+                if label not in {"DATA_QUERY", "CONVERSATION", "OUT_OF_SCOPE"}:
+                    logger.warning("LLM returned invalid label: %s", label)
+                    return None, raw_str
+                return (label, confidence, reason), raw_str
+
+            # parse failed -> return None and raw for logging
+            return None, raw_str
+
+        except Exception as e:
+            logger.exception("_llm_classify: llm.generate error: %s", e)
+            return None, None
+
+    # 1st attempt
+    parsed, raw = _call_llm_and_parse(base_prompt)
+    if parsed:
+        LLM_SUCCESS_COUNT += 1
+        return parsed
+
+    # Log raw output (if present) at WARN to make failures searchable
+    if raw:
+        LLM_PARSE_FAIL_COUNT += 1
+        logger.warning("Classifier LLM parse failure. Raw output (first 1000 chars): %s", raw[:1000])
+    else:
+        LLM_ERROR_COUNT += 1
+        logger.warning("Classifier LLM did not return any output or raised an exception.")
+
+    # Retry once with explicit fallback JSON instruction
+    retry_prompt = base_prompt + '\nIf you cannot produce EXACT JSON ONLY, return {"label":"OUT_OF_SCOPE","confidence":0.0,"reason":"json_parse_failed"}'
+    parsed, raw_retry = _call_llm_and_parse(retry_prompt)
+    if parsed:
+        LLM_SUCCESS_COUNT += 1
+        return parsed
+
+    # still failed -> log both raw attempts (if available)
+    if raw_retry:
+        logger.warning("Classifier LLM retry parse failure. Raw (retry) (first 1000 chars): %s", raw_retry[:1000])
+
+    # Heuristic fallback: column match if available
+    try:
+        if columns:
+            cols_lower = {c.lower() for c in columns}
+            words = re.findall(r"[A-Za-z0-9_]+", message.lower())
+            matched = [w for w in words if w in cols_lower]
+            if matched:
+                return ("DATA_QUERY", 0.6, f"heuristic fallback matched columns: {', '.join(sorted(set(matched)))}")
+    except Exception:
+        logger.exception("Heuristic fallback failed.")
+
+    return ("OUT_OF_SCOPE", 0.25, "fallback: unable to classify with LLM")
+
+
+# -----------------------------
+# Public API: classify_user_message
+# -----------------------------
+def classify_user_message(message: str, mdl: Optional[Any] = None, columns: Optional[List[str]] = None) -> Tuple[str, float, str]:
+    """
+    Classify a user's message relative to the dataset agent.
+
+    Args:
+        message: user text
+        mdl: optional DatasetMDL object (if present, its text will be used)
+        columns: optional list of column names (used for quick heuristics)
+
+    Returns:
+        (label, confidence, reason)
+    """
+    # Ensure columns list if available from mdl
+    if columns is None and hasattr(mdl, "fields"):
+        try:
+            columns = [f.name for f in mdl.fields]
+        except Exception:
+            columns = None
+
+    # 1) Fast local heuristics (no LLM call)
+    try:
+        quick = _local_quick_classify(message, columns)
+        if quick:
+            logger.info(f"classify_user_message: quick-classifier -> {quick}")
+            return quick
+    except Exception:
+        logger.exception("Quick classifier failed; continuing to LLM.")
+
+    # 2) Ask LLM classifier (deterministic)
+    mdl_text = None
+    try:
+        if mdl is not None:
+            # if it's a DatasetMDL instance, convert to text representation
+            try:
+                mdl_text = mdl_to_text(mdl)
+            except Exception:
+                # if not convertible, fall back to a simple schema text
+                try:
+                    mdl_text = ", ".join([f.name for f in mdl.fields])
+                except Exception:
+                    mdl_text = None
+    except Exception:
+        mdl_text = None
+
+    label, confidence, reason = _llm_classify(message, mdl_text, columns)
+
+    # 3) Post-process: enforce bounds and sensible defaults
+    if confidence is None:
+        confidence = 0.0
+    confidence = max(0.0, min(1.0, float(confidence)))
+
+    # If confidence below a very low floor, mark as OUT_OF_SCOPE
+    if confidence < 0.10 and label != "CONVERSATION":
+        logger.warning(f"classifier low confidence {confidence}; downgrading to OUT_OF_SCOPE")
+        return ("OUT_OF_SCOPE", confidence, "low confidence fallback")
+
+    logger.info(f"classify_user_message: LLM -> label={label} confidence={confidence} reason={reason}")
+    return (label, confidence, reason)
+
+# End of additions to mdl_utils.py
