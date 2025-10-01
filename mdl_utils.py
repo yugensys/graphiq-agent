@@ -39,9 +39,12 @@ def get_llm_provider(provider: Optional[str] = None):
     provider = (provider or "deepseek").lower()
     logger.debug(f"get_llm_provider: selected provider='{provider}'")
     if provider == "deepseek":
-        return DeepSeekProvider()
-    else:
-        raise ValueError(f"Unsupported LLM provider: {provider}")
+        try:
+            return DeepSeekProvider()
+        except ValueError:
+            logger.warning("DeepSeek API key missing — using NoOpLLM fallback.")
+            return NoOpLLM()
+    raise ValueError(f"Unsupported LLM provider: {provider}")
 
 
 DEEPSEEK_API_URL = "https://api.deepseek.com/v1/chat/completions"
@@ -109,6 +112,17 @@ class DeepSeekProvider:
         except Exception as e:
             logger.exception(f"DeepSeek API error: {e}")
             raise
+
+# miniclass fallback 
+class NoOpLLM:
+    model_name = "noop"
+    def generate(self, prompt: str, max_tokens: int = 500, temperature: float = 0.0) -> str:
+        # Be conservative: return clearly invalid responses when prompt expects SQL/JSON
+        if "INVALID QUERY" in prompt:
+            return "INVALID QUERY"
+        # generic useful fallback for summaries / suggestions
+        return "LLM unavailable: please set DEEPSEEK_API_KEY to enable advanced features."
+
 
 # ---------------------------------------------------------------------------
 # Schema Models

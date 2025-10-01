@@ -111,6 +111,7 @@ class QueryInput(BaseModel):
 
 
 class QueryResponse(BaseModel):
+    query: Optional[str] = None
     summary: Optional[str] = None
     chart_image: Optional[str] = None
     plotly_json: Optional[str] = None
